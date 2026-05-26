@@ -1,14 +1,14 @@
 /* 基础重置和变量 */
 :root {
-    --primary-color: #2563eb;
-    --primary-dark: #1d4ed8;
+    --yellow: #FFE700;
+    --yellow-dark: #d4c000;
+    --black: #0E171E;
+    --white: #FFFFFF;
+    --light-gray: #F5F5F5;
     --secondary-color: #6b7280;
-    --success-color: #10b981;
     --danger-color: #ef4444;
     --warning-color: #f59e0b;
     --info-color: #3b82f6;
-    --light-color: #f9fafb;
-    --dark-color: #111827;
     --border-color: #e5e7eb;
     --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
     --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
@@ -25,8 +25,8 @@
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     line-height: 1.6;
-    color: var(--dark-color);
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    color: var(--black);
+    background: var(--light-gray);
     min-height: 100vh;
 }
 
@@ -43,55 +43,73 @@ body {
 .header {
     background: white;
     border-radius: var(--radius);
-    padding: 24px;
     margin-bottom: 24px;
-    box-shadow: var(--shadow);
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
 }
 
-.logo {
+/* 黑底黄字顶部栏（不含步骤条） */
+.header-top {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 20px;
+    padding: 18px 28px;
+    background: var(--black);
 }
 
-.logo i {
-    font-size: 32px;
-    color: var(--primary-color);
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex: 1;
 }
 
-.logo h1 {
-    font-size: 28px;
+.ey-logo {
+    height: 32px;
+    width: auto;
+    display: block;
+    padding-right: 18px;
+    border-right: 1px solid rgba(255, 255, 255, 0.15);
+    filter: brightness(0) invert(1);
+}
+
+.header-page-icon {
+    font-size: 20px;
+    color: var(--yellow);
+}
+
+.header h1 {
+    font-size: 20px;
     font-weight: 700;
-    color: var(--dark-color);
+    color: white;
+    letter-spacing: 0.5px;
 }
 
 .back-link {
-    color: var(--secondary-color);
+    color: rgba(255, 255, 255, 0.55);
     text-decoration: none;
-    padding: 8px;
-    border-radius: var(--radius-sm);
+    padding: 4px 8px;
+    border-radius: 4px;
     transition: all 0.2s;
+    font-size: 16px;
 }
 
 .back-link:hover {
-    background: var(--light-color);
-    color: var(--primary-color);
+    background: var(--yellow);
+    color: var(--black);
 }
 
 .subtitle {
-    font-size: 16px;
+    font-size: 15px;
     color: var(--secondary-color);
-    margin-top: -8px;
+    margin: 0;
 }
 
 .version {
-    font-size: 14px;
-    color: var(--success-color);
+    font-size: 13px;
+    color: var(--yellow);
     font-weight: 500;
-    background: rgba(16, 185, 129, 0.1);
+    background: var(--black);
     padding: 4px 12px;
     border-radius: 20px;
     display: inline-block;
@@ -101,57 +119,78 @@ body {
 /* 步骤指示器 */
 .steps {
     display: flex;
-    gap: 8px;
-    margin-top: 8px;
+    gap: 6px;
+    padding: 20px 24px;
 }
 
 .step {
     flex: 1;
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 12px;
-    background: var(--light-color);
-    border-radius: var(--radius-sm);
+    gap: 10px;
+    padding: 14px 16px;
+    background: #eef0f2;
+    border-radius: var(--radius);
     position: relative;
+    transition: all 0.2s ease;
+}
+
+/* 步骤间连接线 */
+.step::after {
+    content: '';
+    position: absolute;
+    right: -6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 6px;
+    height: 6px;
+    background: #d1d5db;
+    border-radius: 50%;
+}
+
+.step:last-child::after {
+    display: none;
 }
 
 .step.active {
-    background: var(--primary-color);
-    color: white;
+    background: var(--yellow);
+    color: var(--black);
+    box-shadow: 0 3px 16px rgba(255, 231, 0, 0.35);
 }
 
 .step.completed {
-    background: var(--success-color);
+    background: var(--black);
     color: white;
 }
 
 .step-number {
-    width: 24px;
-    height: 24px;
+    width: 30px;
+    height: 30px;
     border-radius: 50%;
-    background: white;
-    color: var(--dark-color);
+    background: rgba(0, 0, 0, 0.08);
+    color: var(--black);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 12px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 700;
+    flex-shrink: 0;
 }
 
 .step.active .step-number {
-    background: white;
-    color: var(--primary-color);
+    background: var(--black);
+    color: var(--yellow);
 }
 
 .step.completed .step-number {
-    background: white;
-    color: var(--success-color);
+    background: rgba(255, 231, 0, 0.2);
+    color: var(--yellow);
 }
 
 .step-text {
-    font-size: 14px;
-    font-weight: 500;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 /* 主内容区 */
@@ -173,7 +212,7 @@ body {
 .card-icon {
     width: 64px;
     height: 64px;
-    background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
+    background: var(--black);
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -183,13 +222,13 @@ body {
 
 .card-icon i {
     font-size: 28px;
-    color: white;
+    color: var(--yellow);
 }
 
 .welcome-card h2 {
     font-size: 32px;
     margin-bottom: 16px;
-    color: var(--dark-color);
+    color: var(--black);
 }
 
 .description {
@@ -208,22 +247,22 @@ body {
 }
 
 .feature {
-    background: var(--light-color);
+    background: var(--light-gray);
     padding: 24px;
     border-radius: var(--radius);
-    border-left: 4px solid var(--primary-color);
+    border-left: 4px solid var(--yellow);
 }
 
 .feature i {
     font-size: 24px;
-    color: var(--primary-color);
+    color: var(--yellow);
     margin-bottom: 16px;
 }
 
 .feature h3 {
     font-size: 18px;
     margin-bottom: 8px;
-    color: var(--dark-color);
+    color: var(--black);
 }
 
 .feature p {
@@ -253,26 +292,26 @@ body {
 }
 
 .btn-primary {
-    background: var(--primary-color);
-    color: white;
+    background: var(--yellow);
+    color: var(--black);
 }
 
 .btn-primary:hover {
-    background: var(--primary-dark);
+    background: var(--yellow-dark);
     transform: translateY(-2px);
     box-shadow: var(--shadow);
 }
 
 .btn-secondary {
     background: white;
-    color: var(--dark-color);
+    color: var(--black);
     border: 1px solid var(--border-color);
 }
 
 .btn-secondary:hover {
-    background: var(--light-color);
-    border-color: var(--primary-color);
-    color: var(--primary-color);
+    background: var(--light-gray);
+    border-color: var(--black);
+    color: var(--black);
 }
 
 .btn-small {
@@ -286,7 +325,7 @@ body {
     transform: none !important;
 }
 
-/* 上传区域样式补充 */
+/* 上传区域样式 */
 .upload-card {
     background: white;
     border-radius: var(--radius);
@@ -303,12 +342,12 @@ body {
 
 .card-section-header i {
     font-size: 24px;
-    color: var(--primary-color);
+    color: var(--yellow);
 }
 
 .card-section-header h3 {
     font-size: 20px;
-    color: var(--dark-color);
+    color: var(--black);
     display: flex;
     align-items: center;
     gap: 10px;
@@ -344,13 +383,13 @@ body {
     align-items: center;
     gap: 8px;
     padding: 12px 16px;
-    background: rgba(16, 185, 129, 0.05);
-    border: 1px solid rgba(16, 185, 129, 0.3);
+    background: rgba(14, 23, 30, 0.05);
+    border: 1px solid rgba(14, 23, 30, 0.2);
     border-radius: 6px;
     margin-top: 16px;
     justify-content: center;
     font-size: 14px;
-    color: #065f46;
+    color: var(--black);
 }
 
 /* 配置卡片共用 */
@@ -370,7 +409,7 @@ body {
     align-items: center;
     gap: 8px;
     margin-bottom: 8px;
-    color: var(--dark-color);
+    color: var(--black);
 }
 
 .config-description {
@@ -379,13 +418,13 @@ body {
 }
 
 .upload-area.dragover {
-    border-color: var(--primary-color);
-    background: rgba(37, 99, 235, 0.05);
+    border-color: var(--yellow);
+    background: rgba(255, 231, 0, 0.05);
 }
 
 .upload-area.has-file {
-    border-color: var(--success-color);
-    background: rgba(16, 185, 129, 0.05);
+    border-color: var(--black);
+    background: rgba(14, 23, 30, 0.05);
 }
 
 .upload-icon {
@@ -395,11 +434,11 @@ body {
 }
 
 .upload-area.dragover .upload-icon {
-    color: var(--primary-color);
+    color: var(--yellow);
 }
 
 .upload-area.has-file .upload-icon {
-    color: var(--success-color);
+    color: var(--black);
 }
 
 .upload-hint {
@@ -419,14 +458,14 @@ body {
     align-items: center;
     gap: 16px;
     padding: 16px;
-    background: var(--light-color);
+    background: var(--light-gray);
     border-radius: var(--radius);
-    border-left: 4px solid var(--success-color);
+    border-left: 4px solid var(--black);
 }
 
 .file-details i {
     font-size: 24px;
-    color: var(--success-color);
+    color: var(--black);
 }
 
 .file-details h4 {
@@ -441,7 +480,7 @@ body {
 
 /* 上传提示 */
 .upload-tips {
-    background: rgba(59, 130, 246, 0.1);
+    background: rgba(14, 23, 30, 0.04);
     border-radius: var(--radius);
     padding: 20px;
     margin-bottom: 32px;
@@ -452,7 +491,7 @@ body {
     align-items: center;
     gap: 8px;
     margin-bottom: 12px;
-    color: var(--info-color);
+    color: var(--black);
 }
 
 .upload-tips ul {
@@ -469,7 +508,7 @@ body {
 
 .upload-tips li:before {
     content: "•";
-    color: var(--info-color);
+    color: var(--yellow);
     font-size: 20px;
     position: absolute;
     left: 0;
@@ -493,14 +532,14 @@ body {
 }
 
 .example {
-    background: var(--light-color);
+    background: var(--light-gray);
     padding: 20px;
     border-radius: var(--radius);
-    border-left: 4px solid var(--warning-color);
+    border-left: 4px solid var(--yellow);
 }
 
 .example h4 {
-    color: var(--dark-color);
+    color: var(--black);
     margin-bottom: 8px;
     display: flex;
     align-items: center;
@@ -523,7 +562,7 @@ body {
     align-items: center;
     gap: 8px;
     margin-bottom: 8px;
-    color: var(--dark-color);
+    color: var(--black);
 }
 
 .mapper-description, .mapper-hint {
@@ -541,7 +580,7 @@ body {
     align-items: center;
     gap: 8px;
     margin-bottom: 16px;
-    color: var(--dark-color);
+    color: var(--black);
 }
 
 .preview-table-container {
@@ -557,11 +596,11 @@ body {
 }
 
 .preview-table th {
-    background: var(--light-color);
+    background: var(--black);
     padding: 12px 16px;
     text-align: left;
     font-weight: 600;
-    color: var(--dark-color);
+    color: white;
     border-bottom: 1px solid var(--border-color);
 }
 
@@ -576,7 +615,7 @@ body {
 }
 
 .preview-table tr:hover {
-    background: rgba(37, 99, 235, 0.05);
+    background: rgba(255, 231, 0, 0.08);
 }
 
 /* 映射表格 */
@@ -598,11 +637,11 @@ body {
 }
 
 .mapping-table th {
-    background: var(--light-color);
+    background: var(--black);
     padding: 16px;
     text-align: left;
     font-weight: 600;
-    color: var(--dark-color);
+    color: white;
     border-bottom: 1px solid var(--border-color);
 }
 
@@ -617,7 +656,7 @@ body {
 }
 
 .mapping-table tr:hover {
-    background: rgba(37, 99, 235, 0.05);
+    background: rgba(255, 231, 0, 0.08);
 }
 
 /* 字段选择器 */
@@ -633,8 +672,8 @@ body {
 
 .field-select:focus {
     outline: none;
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    border-color: var(--yellow);
+    box-shadow: 0 0 0 3px rgba(255, 231, 0, 0.15);
 }
 
 .field-select.error {
@@ -670,18 +709,18 @@ body {
 }
 
 .type-date {
-    background: rgba(16, 185, 129, 0.1);
-    color: var(--success-color);
+    background: rgba(14, 23, 30, 0.06);
+    color: var(--black);
 }
 
 .type-text {
-    background: rgba(59, 130, 246, 0.1);
-    color: var(--info-color);
+    background: rgba(255, 231, 0, 0.15);
+    color: var(--black);
 }
 
 .type-number {
-    background: rgba(245, 158, 11, 0.1);
-    color: var(--warning-color);
+    background: rgba(14, 23, 30, 0.06);
+    color: var(--black);
 }
 
 /* 映射操作 */
@@ -718,7 +757,7 @@ body {
     width: 50px;
     height: 50px;
     border: 3px solid var(--border-color);
-    border-top-color: var(--primary-color);
+    border-top-color: var(--yellow);
     border-radius: 50%;
     animation: spin 1s linear infinite;
     margin: 0 auto 20px;
@@ -726,7 +765,7 @@ body {
 
 .loading-content h3 {
     margin-bottom: 8px;
-    color: var(--dark-color);
+    color: var(--black);
 }
 
 .loading-content p {

@@ -12,12 +12,15 @@
 <body>
     <div class="container">
         <header class="header">
-            <div class="logo">
-                <a href="{{ url_for('field_mapper_page') }}" class="back-link">
-                    <i class="fas fa-arrow-left"></i>
-                </a>
-                <i class="fas fa-search"></i>
-                <h1>智能查询</h1>
+            <div class="header-top">
+                <div class="header-left">
+                    <img src="/static/images/ey-logo.png" alt="EY" class="ey-logo">
+                    <a href="{{ url_for('field_mapper_page') }}" class="back-link">
+                        <i class="fas fa-arrow-left"></i>
+                    </a>
+                    <i class="fas fa-search header-page-icon"></i>
+                    <h1>智能查询</h1>
+                </div>
             </div>
             <div class="steps">
                 <div class="step completed">
@@ -1429,7 +1432,7 @@
         }
 
         .status-active {
-            color: #10b981;
+            color: var(--black);
             background: rgba(16, 185, 129, 0.1);
             padding: 2px 8px;
             border-radius: 4px;
@@ -1447,7 +1450,7 @@
             align-items: center;
             gap: 10px;
             padding: 12px;
-            background: #f9fafb;
+            background: var(--light-gray);
             border: 1px solid #e5e7eb;
             border-radius: 6px;
             cursor: pointer;
@@ -1476,12 +1479,12 @@
         }
 
         .btn-success {
-            background: #10b981;
+            background: var(--black);
             color: white;
         }
 
         .btn-success:hover {
-            background: #0da271;
+            background: #1a2a36;
         }
 
         .query-input-card, .code-editor-card, .result-preview-card {
@@ -1518,7 +1521,7 @@
 
         #query-input:focus {
             outline: none;
-            border-color: #2563eb;
+            border-color: var(--yellow);
             box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
         }
 
@@ -1530,8 +1533,8 @@
         }
 
         .query-tips {
-            background: #f0f9ff;
-            border: 1px solid #bae6fd;
+            background: rgba(255, 231, 0, 0.08);
+            border: 1px solid var(--yellow);
             border-radius: 6px;
             padding: 16px;
             font-size: 14px;
@@ -1539,7 +1542,7 @@
 
         .query-tips p {
             margin-bottom: 8px;
-            color: #0369a1;
+            color: var(--black);
             font-weight: 600;
         }
 
@@ -1557,7 +1560,7 @@
 
         .query-tips li:before {
             content: "•";
-            color: #0ea5e9;
+            color: #d4c000;
             position: absolute;
             left: -15px;
         }
@@ -1589,7 +1592,7 @@
         }
 
         .code-explanation {
-            background: #f9fafb;
+            background: var(--light-gray);
             border: 1px solid #e5e7eb;
             border-radius: 6px;
             padding: 16px;
@@ -1626,7 +1629,7 @@
             color: #d63384;
         }
         .explanation-content strong {
-            color: #2563eb;
+            color: var(--yellow);
         }
 
         .result-header {
@@ -1653,7 +1656,7 @@
             align-items: center;
             gap: 12px;
             padding: 16px;
-            background: #f9fafb;
+            background: var(--light-gray);
             border-radius: 8px;
             border: 1px solid #e5e7eb;
         }
@@ -1674,7 +1677,7 @@
             display: block;
             font-size: 20px;
             font-weight: 600;
-            color: #111827;
+            color: var(--black);
         }
 
         .summary-text {
@@ -1703,7 +1706,7 @@
         }
 
         .result-table th {
-            background: #f9fafb;
+            background: var(--light-gray);
             padding: 12px 16px;
             text-align: left;
             font-weight: 600;
@@ -1729,7 +1732,7 @@
             justify-content: space-between;
             align-items: center;
             padding: 12px 16px;
-            background: #f9fafb;
+            background: var(--light-gray);
             border-top: 1px solid #e5e7eb;
             font-size: 14px;
             color: #6b7280;
@@ -1756,7 +1759,7 @@
 
         .page-current {
             padding: 4px 8px;
-            background: #2563eb;
+            background: var(--yellow);
             color: white;
             border-radius: 4px;
             font-size: 12px;
@@ -1854,7 +1857,7 @@
         }
         .history-success {
             background: #d1fae5;
-            color: #065f46;
+            color: var(--black);
         }
         .history-error {
             background: #fee2e2;
@@ -1896,7 +1899,7 @@
         }
         .rule-packs-card .rule-pack-header {
             padding: 10px 12px;
-            background: #f9fafb;
+            background: var(--light-gray);
             border: 1px solid #e5e7eb;
             border-radius: 6px;
             cursor: pointer;
@@ -1985,7 +1988,7 @@
             line-height: 1;
         }
         .modal-close:hover {
-            color: #111827;
+            color: var(--black);
         }
         .modal-body {
             padding: 20px 24px;
@@ -2028,7 +2031,7 @@
         }
         .rule-info strong {
             font-size: 13px;
-            color: #111827;
+            color: var(--black);
         }
         .rule-info p {
             font-size: 12px;
@@ -2047,12 +2050,12 @@
             font-weight: normal;
         }
         .rule-builtin {
-            background: #e0e7ff;
-            color: #3730a3;
+            background: rgba(255, 231, 0, 0.15);
+            color: var(--black);
         }
         .rule-custom {
             background: #d1fae5;
-            color: #065f46;
+            color: var(--black);
         }
         .rule-actions {
             display: flex;
@@ -2087,7 +2090,7 @@
         }
         .rule-form input:focus, .rule-form textarea:focus {
             outline: none;
-            border-color: #2563eb;
+            border-color: var(--yellow);
             box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
         }
         .rule-form textarea {
@@ -2107,7 +2110,7 @@
             justify-content: space-between;
             align-items: center;
             padding: 12px 14px;
-            background: #f9fafb;
+            background: var(--light-gray);
             cursor: pointer;
             user-select: none;
             transition: background 0.15s;
@@ -2123,7 +2126,7 @@
         }
         .rule-pack-info strong {
             font-size: 14px;
-            color: #111827;
+            color: var(--black);
         }
         .rule-pack-source {
             font-size: 11px;
@@ -2201,7 +2204,7 @@
         .optimize-result textarea {
             flex: 1;
             padding: 12px;
-            border: 1px solid #3b82f6;
+            border: 1px solid var(--yellow);
             border-radius: 6px;
             font-size: 14px;
             line-height: 1.6;
@@ -2211,7 +2214,7 @@
         }
         .optimize-result textarea:focus {
             outline: none;
-            box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+            box-shadow: 0 0 0 3px rgba(255,231,0,0.25);
         }
         .optimize-arrow {
             display: flex;
@@ -2253,7 +2256,7 @@
             transition: background 0.15s;
         }
         .review-header:hover {
-            background: #f9fafb;
+            background: var(--light-gray);
         }
         .review-header h3 {
             margin: 0;
@@ -2271,7 +2274,7 @@
         }
         .review-status-pass {
             background: #d1fae5;
-            color: #065f46;
+            color: var(--black);
         }
         .review-status-fail {
             background: #fee2e2;
@@ -2306,7 +2309,7 @@
         .review-summary.passed {
             background: #f0fdf4;
             border: 1px solid #bbf7d0;
-            color: #166534;
+            color: var(--black);
         }
         .review-summary.failed {
             background: #fef2f2;
@@ -2336,7 +2339,7 @@
             font-size: 16px;
         }
         .review-aspect-pass {
-            color: #059669;
+            color: var(--black);
         }
         .review-aspect-fail {
             color: #dc2626;

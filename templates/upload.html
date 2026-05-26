@@ -9,9 +9,9 @@
     <style>
         .history-match-banner {
             margin: 20px 0;
-            border: 1px solid #bfdbfe;
+            border: 1px solid var(--yellow);
             border-radius: 10px;
-            background: #eff6ff;
+            background: rgba(255, 231, 0, 0.08);
             overflow: hidden;
         }
         .history-match-content {
@@ -25,11 +25,11 @@
             width: 40px;
             height: 40px;
             border-radius: 50%;
-            background: #dbeafe;
+            background: rgba(255, 231, 0, 0.18);
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #2563eb;
+            color: var(--yellow);
             font-size: 18px;
         }
         .history-match-text {
@@ -37,7 +37,7 @@
         }
         .history-match-text strong {
             font-size: 15px;
-            color: #1e40af;
+            color: var(--black);
         }
         .history-match-text p {
             margin: 4px 0 0;
@@ -58,8 +58,8 @@
         .upload-config {
             margin-top: 16px;
             padding: 16px;
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
+            background: var(--light-gray);
+            border: 1px solid var(--border-color);
             border-radius: 8px;
             text-align: left;
         }
@@ -73,7 +73,7 @@
         .config-row label {
             font-weight: 600;
             font-size: 14px;
-            color: #334155;
+            color: var(--black);
             white-space: nowrap;
         }
         .config-select {
@@ -95,14 +95,14 @@
         }
         .config-hint {
             font-size: 12px;
-            color: #94a3b8;
+            color: var(--secondary-color);
         }
         .raw-preview {
             margin-top: 12px;
         }
         .raw-preview h4 {
             font-size: 14px;
-            color: #475569;
+            color: var(--black);
             margin: 0 0 8px;
         }
         .preview-table-wrapper {
@@ -127,17 +127,17 @@
             text-overflow: ellipsis;
         }
         .preview-table th {
-            background: #f1f5f9;
+            background: var(--light-gray);
             font-weight: 600;
-            color: #334155;
+            color: var(--black);
         }
         .preview-table tr.header-row td {
-            background: #d1fae5;
+            background: rgba(255, 231, 0, 0.15);
             font-weight: 600;
         }
         .preview-hint {
             font-size: 12px;
-            color: #94a3b8;
+            color: var(--secondary-color);
             margin: 6px 0 0;
         }
         .preview-sheet-label {
@@ -150,12 +150,15 @@
 <body>
     <div class="container">
         <header class="header">
-            <div class="logo">
-                <a href="{{ url_for('index') }}" class="back-link">
-                    <i class="fas fa-arrow-left"></i>
-                </a>
-                <i class="fas fa-file-upload"></i>
-                <h1>数据上传</h1>
+            <div class="header-top">
+                <div class="header-left">
+                    <img src="/static/images/ey-logo.png" alt="EY" class="ey-logo">
+                    <a href="{{ url_for('index') }}" class="back-link">
+                        <i class="fas fa-arrow-left"></i>
+                    </a>
+                    <i class="fas fa-file-upload header-page-icon"></i>
+                    <h1>数据上传</h1>
+                </div>
             </div>
             <div class="steps">
                 <div class="step active">
@@ -237,7 +240,7 @@
                     </div>
 
                     <div class="upload-status" id="journal-upload-status" style="display: none;">
-                        <i class="fas fa-check-circle" style="color: #10b981;"></i>
+                        <i class="fas fa-check-circle" style="color: var(--black);"></i>
                         <span id="journal-upload-message"></span>
                     </div>
 
@@ -323,7 +326,7 @@
                     </div>
 
                     <div class="upload-status" id="balance-upload-status" style="display: none;">
-                        <i class="fas fa-check-circle" style="color: #10b981;"></i>
+                        <i class="fas fa-check-circle" style="color: var(--black);"></i>
                         <span id="balance-upload-message"></span>
                     </div>
 

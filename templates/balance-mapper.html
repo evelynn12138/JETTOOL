@@ -10,12 +10,15 @@
 <body>
     <div class="container">
         <header class="header">
-            <div class="logo">
-                <a href="{{ url_for('field_mapper_page') }}" class="back-link">
-                    <i class="fas fa-arrow-left"></i>
-                </a>
-                <i class="fas fa-balance-scale"></i>
-                <h1>字段映射 - 科目余额表</h1>
+            <div class="header-top">
+                <div class="header-left">
+                    <img src="/static/images/ey-logo.png" alt="EY" class="ey-logo">
+                    <a href="{{ url_for('field_mapper_page') }}" class="back-link">
+                        <i class="fas fa-arrow-left"></i>
+                    </a>
+                    <i class="fas fa-balance-scale header-page-icon"></i>
+                    <h1>字段映射 - 科目余额表</h1>
+                </div>
             </div>
             <div class="steps">
                 <div class="step completed">

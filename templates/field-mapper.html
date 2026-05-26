@@ -13,7 +13,7 @@
             gap: 8px;
             margin-bottom: 4px;
             font-size: 18px;
-            color: var(--dark-color);
+            color: var(--black);
         }
         .mapper-section-title i {
             font-size: 22px;
@@ -29,7 +29,7 @@
         .mapper-section-title .section-optional {
             font-size: 11px;
             background: rgba(107,114,128,0.1);
-            color: #6b7280;
+            color: var(--secondary-color);
             padding: 2px 8px;
             border-radius: 10px;
             margin-left: 8px;
@@ -40,10 +40,10 @@
             gap: 10px;
             padding: 12px 18px;
             margin-bottom: 18px;
-            background: #eff6ff;
-            border: 1px solid #bfdbfe;
+            background: rgba(255, 231, 0, 0.08);
+            border: 1px solid var(--yellow);
             border-radius: 8px;
-            color: #1e40af;
+            color: var(--black);
             font-size: 14px;
         }
         .history-prefill-banner i {
@@ -56,7 +56,7 @@
             font-size: 13px;
             vertical-align: middle;
         }
-        .conf-high { color: #10b981; }
+        .conf-high { color: var(--black); font-weight: 700; }
         .conf-medium { color: #f59e0b; }
         .conf-low { color: #ef4444; }
 
@@ -89,7 +89,7 @@
             align-items: center;
             gap: 6px;
             font-size: 13px;
-            color: #6b7280;
+            color: var(--secondary-color);
             cursor: pointer;
             margin-left: auto;
             user-select: none;
@@ -102,12 +102,15 @@
 <body>
     <div class="container">
         <header class="header">
-            <div class="logo">
-                <a href="{{ url_for('api_config_page') }}" class="back-link">
-                    <i class="fas fa-arrow-left"></i>
-                </a>
-                <i class="fas fa-project-diagram"></i>
-                <h1>字段映射</h1>
+            <div class="header-top">
+                <div class="header-left">
+                    <img src="/static/images/ey-logo.png" alt="EY" class="ey-logo">
+                    <a href="{{ url_for('api_config_page') }}" class="back-link">
+                        <i class="fas fa-arrow-left"></i>
+                    </a>
+                    <i class="fas fa-project-diagram header-page-icon"></i>
+                    <h1>字段映射</h1>
+                </div>
             </div>
             <div class="steps">
                 <div class="step completed">
@@ -138,7 +141,7 @@
             <div class="mapper-card">
                 <div class="mapper-header">
                     <div class="mapper-section-title">
-                        <i class="fas fa-cogs" style="color:#2563eb;"></i>
+                        <i class="fas fa-cogs" style="color:var(--yellow);"></i>
                         <span>序时账字段映射</span>
                         <span class="section-required">必要</span>
                     </div>
@@ -198,7 +201,7 @@
                         <button class="btn btn-small" id="auto-map-btn">
                             <i class="fas fa-magic"></i> 智能重新映射
                         </button>
-                        <button class="btn btn-small" id="ai-auto-map-btn" style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none;">
+                        <button class="btn btn-small" id="ai-auto-map-btn" style="background: var(--yellow); color: var(--black); border: none;">
                             <i class="fas fa-robot"></i> AI 智能映射
                         </button>
                         <button class="btn btn-small" id="reset-btn">
@@ -217,7 +220,7 @@
             <div class="mapper-card" style="margin-top: 24px;">
                 <div class="mapper-header">
                     <div class="mapper-section-title">
-                        <i class="fas fa-balance-scale" style="color:#10b981;"></i>
+                        <i class="fas fa-balance-scale" style="color:var(--black);"></i>
                         <span>科目余额表字段映射</span>
                         <span class="section-optional">可选</span>
                     </div>

@@ -10,12 +10,15 @@
 <body>
     <div class="container">
         <header class="header">
-            <div class="logo">
-                <a href="{{ url_for('field_mapper_page') }}" class="back-link">
-                    <i class="fas fa-arrow-left"></i>
-                </a>
-                <i class="fas fa-check-double"></i>
-                <h1>完整性测试</h1>
+            <div class="header-top">
+                <div class="header-left">
+                    <img src="/static/images/ey-logo.png" alt="EY" class="ey-logo">
+                    <a href="{{ url_for('field_mapper_page') }}" class="back-link">
+                        <i class="fas fa-arrow-left"></i>
+                    </a>
+                    <i class="fas fa-check-double header-page-icon"></i>
+                    <h1>完整性测试</h1>
+                </div>
             </div>
             <div class="steps">
                 <div class="step completed">
@@ -338,7 +341,7 @@
                         <button class="btn btn-secondary" onclick="exportResults()">
                             <i class="fas fa-file-excel"></i> 导出Excel报告
                         </button>
-                        ${!data.all_passed ? `<button class="btn btn-secondary" id="ai-analyze-btn" style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none;">
+                        ${!data.all_passed ? `<button class="btn btn-secondary" id="ai-analyze-btn" style="background: var(--yellow); color: var(--black); border: none;">
                             <i class="fas fa-robot"></i> AI 差异分析
                         </button>` : ''}
                     </div>
@@ -445,19 +448,19 @@
                         </div>
                         <div class="detail-item">
                             <span class="detail-label">一致数量</span>
-                            <span class="detail-value" style="color: #10b981;">${details.consistent_count || 0}</span>
+                            <span class="detail-value" style="color: var(--black);">${details.consistent_count || 0}</span>
                         </div>
                         <div class="detail-item">
                             <span class="detail-label">差异数量</span>
-                            <span class="detail-value" style="color: ${details.difference_count > 0 ? '#ef4444' : '#10b981'};">${details.difference_count || 0}</span>
+                            <span class="detail-value" style="color: ${details.difference_count > 0 ? '#ef4444' : "var(--black)"};">${details.difference_count || 0}</span>
                         </div>
                         <div class="detail-item">
                             <span class="detail-label">仅有序时账</span>
-                            <span class="detail-value" style="color: ${details.only_in_journal > 0 ? '#f59e0b' : '#10b981'};">${details.only_in_journal || 0}</span>
+                            <span class="detail-value" style="color: ${details.only_in_journal > 0 ? '#f59e0b' : "var(--black)"};">${details.only_in_journal || 0}</span>
                         </div>
                         <div class="detail-item">
                             <span class="detail-label">仅有余额表</span>
-                            <span class="detail-value" style="color: ${details.only_in_balance > 0 ? '#f59e0b' : '#10b981'};">${details.only_in_balance || 0}</span>
+                            <span class="detail-value" style="color: ${details.only_in_balance > 0 ? '#f59e0b' : "var(--black)"};">${details.only_in_balance || 0}</span>
                         </div>
                     </div>
                     <div class="balance-check ${consistent ? 'check-pass' : 'check-fail'}">
@@ -798,7 +801,7 @@
             border-radius: 8px;
             padding: 20px;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            border-left: 4px solid #2563eb;
+            border-left: 4px solid var(--yellow);
             transition: transform 0.2s;
         }
 
@@ -807,7 +810,7 @@
         }
 
         .test-card[data-test="balance"] {
-            border-left-color: #10b981;
+            border-left-color: var(--black);
         }
 
         .test-card[data-test="cross"] {
@@ -823,11 +826,11 @@
 
         .test-card-header i {
             font-size: 20px;
-            color: #2563eb;
+            color: var(--yellow);
         }
 
         .test-card[data-test="balance"] .test-card-header i {
-            color: #10b981;
+            color: var(--black);
         }
 
         .test-card[data-test="cross"] .test-card-header i {
@@ -874,7 +877,7 @@
         }
 
         .result-header-bar.status-pass i {
-            color: #10b981;
+            color: var(--black);
         }
 
         .result-header-bar.status-warn i {
@@ -906,12 +909,12 @@
 
         .count-completed {
             background: rgba(16, 185, 129, 0.1);
-            color: #065f46;
+            color: var(--black);
         }
 
         .count-skipped {
             background: rgba(107, 114, 128, 0.1);
-            color: #4b5563;
+            color: var(--secondary-color);
         }
 
         .count-error {
@@ -936,7 +939,7 @@
 
         .test-result-header i {
             font-size: 20px;
-            color: #6b7280;
+            color: var(--secondary-color);
         }
 
         .test-result-header h4 {
@@ -954,7 +957,7 @@
 
         .badge-pass {
             background: rgba(16, 185, 129, 0.1);
-            color: #065f46;
+            color: var(--black);
         }
 
         .badge-fail {
@@ -964,7 +967,7 @@
 
         .badge-skipped {
             background: rgba(107, 114, 128, 0.1);
-            color: #4b5563;
+            color: var(--secondary-color);
         }
 
         .badge-error {
@@ -994,7 +997,7 @@
         }
 
         .detail-item {
-            background: #f9fafb;
+            background: var(--light-gray);
             padding: 12px 16px;
             border-radius: 6px;
             border: 1px solid #e5e7eb;
@@ -1003,7 +1006,7 @@
         .detail-label {
             display: block;
             font-size: 12px;
-            color: #6b7280;
+            color: var(--secondary-color);
             margin-bottom: 4px;
         }
 
@@ -1011,7 +1014,7 @@
             display: block;
             font-size: 18px;
             font-weight: 600;
-            color: #111827;
+            color: var(--black);
         }
 
         .value-warn {
@@ -1030,7 +1033,7 @@
 
         .check-pass {
             background: rgba(16, 185, 129, 0.1);
-            color: #065f46;
+            color: var(--black);
         }
 
         .check-fail {
@@ -1064,7 +1067,7 @@
         }
 
         .detail-table th {
-            background: #f9fafb;
+            background: var(--light-gray);
             padding: 8px 12px;
             text-align: left;
             font-weight: 600;
@@ -1076,7 +1079,7 @@
         .detail-table td {
             padding: 8px 12px;
             border-bottom: 1px solid #e5e7eb;
-            color: #4b5563;
+            color: var(--secondary-color);
         }
 
         .detail-hint {
@@ -1092,7 +1095,7 @@
             align-items: center;
             gap: 16px;
             padding: 20px;
-            background: #f9fafb;
+            background: var(--light-gray);
             border-radius: 8px;
             border: 1px solid #e5e7eb;
         }
@@ -1133,7 +1136,7 @@
         }
 
         .toggle-switch input:checked + .toggle-slider {
-            background: #2563eb;
+            background: var(--yellow);
         }
 
         .toggle-switch input:checked + .toggle-slider:before {
@@ -1156,8 +1159,8 @@
 
         /* 反结转信息卡片 */
         .cf-info-card {
-            background: rgba(59, 130, 246, 0.08);
-            border: 1px solid rgba(59, 130, 246, 0.25);
+            background: rgba(255, 231, 0, 0.08);
+            border: 1px solid var(--yellow);
             border-radius: 8px;
             padding: 20px;
             margin-bottom: 20px;
@@ -1172,19 +1175,19 @@
 
         .cf-info-header i {
             font-size: 20px;
-            color: #2563eb;
+            color: var(--yellow);
         }
 
         .cf-info-header h4 {
             flex: 1;
             font-size: 16px;
-            color: #2563eb;
+            color: var(--yellow);
         }
         /* AI 差异分析 */
         .ai-analysis-loading {
             text-align: center;
             padding: 40px 20px;
-            color: #6b7280;
+            color: var(--secondary-color);
         }
         .ai-analysis-loading .spinner {
             margin: 0 auto 16px;
@@ -1195,7 +1198,7 @@
             padding: 20px;
             margin-bottom: 16px;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            border-left: 4px solid #667eea;
+            border-left: 4px solid var(--yellow);
         }
         .ai-analysis-header {
             display: flex;
@@ -1205,7 +1208,7 @@
         }
         .ai-analysis-header i {
             font-size: 20px;
-            color: #667eea;
+            color: var(--black);
         }
         .ai-analysis-header h4 {
             font-size: 16px;
@@ -1213,7 +1216,7 @@
             margin: 0;
         }
         .ai-analysis-body {
-            color: #4b5563;
+            color: var(--secondary-color);
             font-size: 14px;
             line-height: 1.7;
         }
@@ -1235,7 +1238,7 @@
         }
         .ai-analysis-section h5 i {
             font-size: 14px;
-            color: #667eea;
+            color: var(--black);
         }
         .ai-analysis-section ul {
             margin: 0;

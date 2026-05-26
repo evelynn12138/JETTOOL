@@ -10,12 +10,15 @@
 <body>
     <div class="container">
         <header class="header">
-            <div class="logo">
-                <a href="{{ url_for('upload_page') }}" class="back-link">
-                    <i class="fas fa-arrow-left"></i>
-                </a>
-                <i class="fas fa-key"></i>
-                <h1>API配置</h1>
+            <div class="header-top">
+                <div class="header-left">
+                    <img src="/static/images/ey-logo.png" alt="EY" class="ey-logo">
+                    <a href="{{ url_for('upload_page') }}" class="back-link">
+                        <i class="fas fa-arrow-left"></i>
+                    </a>
+                    <i class="fas fa-key header-page-icon"></i>
+                    <h1>API配置</h1>
+                </div>
             </div>
             <div class="steps">
                 <div class="step completed">
@@ -545,15 +548,15 @@
 
     <style>
         .security-warning {
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid rgba(239, 68, 68, 0.3);
+            background: rgba(212, 192, 0, 0.08);
+            border: 1px solid var(--yellow-dark);
             border-radius: 8px;
             padding: 20px;
             margin-bottom: 24px;
         }
 
         .security-warning h4 {
-            color: #ef4444;
+            color: var(--yellow-dark);
             margin-bottom: 12px;
             display: flex;
             align-items: center;
@@ -625,7 +628,7 @@
         }
 
         .form-hint a {
-            color: #2563eb;
+            color: var(--yellow);
             text-decoration: none;
         }
 
@@ -654,7 +657,7 @@
         .test-result {
             margin-top: 20px;
             padding: 20px;
-            background: #f9fafb;
+            background: var(--light-gray);
             border-radius: 8px;
             border: 1px solid #e5e7eb;
         }
@@ -686,9 +689,9 @@
         }
 
         .status-success {
-            background: rgba(16, 185, 129, 0.1);
-            color: #065f46;
-            border: 1px solid rgba(16, 185, 129, 0.3);
+            background: rgba(255, 231, 0, 0.12);
+            color: var(--black);
+            border: 1px solid var(--yellow);
             padding: 12px;
             border-radius: 6px;
             display: flex;
@@ -697,9 +700,9 @@
         }
 
         .status-error {
-            background: rgba(239, 68, 68, 0.1);
-            color: #991b1b;
-            border: 1px solid rgba(239, 68, 68, 0.3);
+            background: rgba(212, 192, 0, 0.08);
+            color: #7a6b00;
+            border: 1px solid var(--yellow-dark);
             padding: 12px;
             border-radius: 6px;
             display: flex;
@@ -708,15 +711,15 @@
         }
 
         .api-info {
-            background: rgba(59, 130, 246, 0.1);
-            border: 1px solid rgba(59, 130, 246, 0.3);
+            background: rgba(255, 231, 0, 0.08);
+            border: 1px solid var(--yellow);
             border-radius: 8px;
             padding: 20px;
             margin-top: 32px;
         }
 
         .api-info h4 {
-            color: #2563eb;
+            color: var(--yellow);
             margin-bottom: 12px;
             display: flex;
             align-items: center;
@@ -735,8 +738,8 @@
         }
 
         .preconfigured-badge {
-            background: rgba(16, 185, 129, 0.1);
-            border: 1px solid rgba(16, 185, 129, 0.3);
+            background: rgba(255, 231, 0, 0.12);
+            border: 1px solid var(--yellow);
             border-radius: 8px;
             padding: 16px 20px;
             margin-bottom: 24px;
@@ -747,16 +750,16 @@
 
         .preconfigured-badge i {
             font-size: 24px;
-            color: #10b981;
+            color: var(--black);
         }
 
         .preconfigured-badge strong {
-            color: #065f46;
+            color: var(--black);
             font-size: 15px;
         }
 
         .preconfigured-badge p {
-            color: #047857;
+            color: var(--black);
             font-size: 13px;
             margin: 4px 0 0 0;
         }
@@ -773,7 +776,7 @@
             justify-content: space-between;
             align-items: center;
             padding: 16px 20px;
-            background: #f9fafb;
+            background: var(--light-gray);
             cursor: pointer;
             user-select: none;
             transition: background 0.15s;
@@ -791,8 +794,8 @@
         }
         .review-badge {
             font-size: 11px;
-            background: #e0e7ff;
-            color: #3730a3;
+            background: rgba(255, 231, 0, 0.15);
+            color: var(--black);
             padding: 2px 8px;
             border-radius: 10px;
             font-weight: normal;
