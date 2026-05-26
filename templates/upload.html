@@ -164,11 +164,11 @@
                 </div>
                 <div class="step">
                     <span class="step-number">2</span>
-                    <span class="step-text">字段映射</span>
+                    <span class="step-text">API配置</span>
                 </div>
                 <div class="step">
                     <span class="step-number">3</span>
-                    <span class="step-text">API配置</span>
+                    <span class="step-text">字段映射</span>
                 </div>
                 <div class="step">
                     <span class="step-number">4</span>
@@ -883,7 +883,7 @@
         }
 
         continueBtn.addEventListener('click', () => {
-            window.location.href = '/field-mapper';
+            window.location.href = '/api-config';
         });
 
         function showLoading(title, msg) {
@@ -925,13 +925,13 @@
 
         historyApplyBtn.addEventListener('click', async () => {
             try {
-                showLoading('正在加载上次映射...', '即将跳转到字段映射页面');
+                showLoading('正在加载上次映射...', '即将跳转到API配置页面');
                 const response = await fetch('/api/mapping-history/apply', {
                     method: 'POST'
                 });
                 const result = await response.json();
                 if (result.success) {
-                    window.location.href = '/field-mapper';
+                    window.location.href = '/api-config';
                 } else {
                     alert('加载映射记录失败: ' + (result.error || '未知错误'));
                     hideLoading();

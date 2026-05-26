@@ -114,6 +114,8 @@ class AICodeGenerator:
 7. 分组使用 GROUP BY，排序使用 ORDER BY
 8. **不要使用 LIMIT**，查询结果不限制行数，返回所有匹配记录
 9. 有科目余额表时可以用 JOIN：FROM "data" d JOIN "balance_data" b ON ...
+10. **保持 SQL 简洁**：能用简单条件表达的就不要写子查询。例如周末判断直接用 `EXTRACT(DOW FROM CAST("日期" AS DATE)) IN (0, 6)`，不要生成日期序列表。
+11. **注意：如果查询中的关键词包含括号同义词标注，如"交易(transaction/txn)"，括号内是对主词的说明，只需对主词（如"交易"）生成 LIKE 条件即可，不需要对括号内每个词单独生成条件。**
 
 ## 输出要求
 请只返回 SQL 代码，不要包含解释或额外文本。SQL 必须完整且可执行。
@@ -327,27 +329,39 @@ class AICodeGenerator:
         except Exception:
             return "解释生成失败。"
 
-    def optimize_query(self, query: str) -> str:
+    def optimize_query(self, query: str, local_expanded: str = None) -> str:
         """
-        优化自然语言查询，使其更清晰、更具体
+        优化自然语言查询，扩展同义词，使其更清晰、更具体
 
         Args:
             query: 原始查询语句
+            local_expanded: 本地词典初步扩展后的查询（可选，供AI参考）
 
         Returns:
             优化后的查询语句
         """
-        prompt = f"""你是一个财务数据分析专家，擅长优化用户的自然语言查询。
+        extra_context = ""
+        if local_expanded and local_expanded != query:
+            extra_context = f"""
 
-请优化以下查询语句，使其更清晰、更具体、更符合财务数据分析的语境：
+本地词典初步扩展参考（可据此调整同义词）:
+{local_expanded}
+"""
 
-原始查询: "{query}"
+        prompt = f"""你是一个财务数据分析专家，擅长优化用户的自然语言查询并扩展同义词。
+
+请优化以下查询语句，使其更清晰、更具体、更适合生成 SQL 查询：
+
+原始查询: "{query}"{extra_context}
 
 优化要求:
 1. 保持查询意图不变，但表达更专业、更清晰
-2. 如果查询模糊，添加合理的具体条件（如时间范围、金额范围等）
-3. 使用财务术语（如科目、凭证、制单人、借方、贷方、金额等）
-4. 确保查询可以直接转换为数据分析代码
+2. **关键：扩展财务关键词的同义词** — 中英文、缩写、常见变体都要补充。
+   例如："包含调整和冲销" → "包含调整、冲销、reverse、adj、adjustment、reversal等相关关键词"
+   注意：用"等"或"等相关关键词"收尾，**不要**用括号标注同义词（如"调整(adj/adjustment)"会误导SQL生成）。
+   不要过度扩展无关词汇，保持 SQL 生成的可行性。
+3. 如果查询模糊，可添加合理的具体条件（如时间范围、金额范围等）
+4. 确保查询可以直接转换为 SQL 代码
 5. 用中文输出优化后的查询语句，不要添加额外解释
 
 优化后的查询:"""

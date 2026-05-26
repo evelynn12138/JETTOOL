@@ -13,7 +13,7 @@
     <div class="container">
         <header class="header">
             <div class="logo">
-                <a href="{{ url_for('api_config_page') }}" class="back-link">
+                <a href="{{ url_for('field_mapper_page') }}" class="back-link">
                     <i class="fas fa-arrow-left"></i>
                 </a>
                 <i class="fas fa-search"></i>
@@ -26,11 +26,11 @@
                 </div>
                 <div class="step completed">
                     <span class="step-number">2</span>
-                    <span class="step-text">字段映射</span>
+                    <span class="step-text">API配置</span>
                 </div>
                 <div class="step completed">
                     <span class="step-number">3</span>
-                    <span class="step-text">API配置</span>
+                    <span class="step-text">字段映射</span>
                 </div>
                 <div class="step completed">
                     <span class="step-number">4</span>
@@ -129,7 +129,7 @@
                         <button class="btn btn-small btn-block" id="manage-rules-btn">
                             <i class="fas fa-filter"></i> 筛选规则管理
                         </button>
-                        <button class="btn btn-small btn-block" onclick="window.location.href='{{ url_for('api_config_page') }}'">
+                        <button class="btn btn-small btn-block" onclick="window.location.href='{{ url_for('field_mapper_page') }}'">
                             <i class="fas fa-cog"></i> 重新配置API
                         </button>
                     </div>
@@ -218,6 +218,31 @@
                         </div>
                     </div>
 
+                    <!-- 复核意见面板 -->
+                    <div class="review-card" id="review-card" style="display: none;">
+                        <div class="review-header" id="review-toggle">
+                            <h3>
+                                <i class="fas fa-clipboard-check"></i> 复核意见
+                                <span class="review-status-badge" id="review-status-badge"></span>
+                            </h3>
+                            <span class="review-toggle-icon" id="review-panel-icon">
+                                <i class="fas fa-chevron-right"></i>
+                            </span>
+                        </div>
+                        <div class="review-body" id="review-body" style="display: none;">
+                            <div class="review-loading" id="review-loading">
+                                <div class="spinner"></div>
+                                <p>正在复核代码，请稍候...</p>
+                            </div>
+                            <div class="review-content" id="review-content" style="display: none;">
+                                <div class="review-summary" id="review-summary"></div>
+                                <div class="review-aspects" id="review-aspects"></div>
+                                <div class="review-model-info" id="review-model-info"></div>
+                            </div>
+                            <div class="review-error" id="review-error" style="display: none;"></div>
+                        </div>
+                    </div>
+
                     <div class="result-preview-card" style="display: none;" id="result-preview">
                         <div class="result-header">
                             <h3><i class="fas fa-table"></i> 执行结果</h3>
@@ -290,6 +315,40 @@
                                 <button type="button" class="btn btn-primary" id="save-rule-btn">保存规则</button>
                             </div>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 优化确认弹窗 -->
+            <div class="modal-overlay" id="optimize-modal" style="display: none;">
+                <div class="modal-content optimize-modal-content">
+                    <div class="modal-header">
+                        <h3><i class="fas fa-magic"></i> 查询优化建议</h3>
+                        <button class="modal-close" id="optimize-modal-close">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="optimize-compare">
+                            <div class="optimize-original">
+                                <h4><i class="fas fa-file-alt"></i> 原始查询</h4>
+                                <div class="optimize-text" id="optimize-original-text"></div>
+                            </div>
+                            <div class="optimize-arrow">
+                                <i class="fas fa-arrow-right"></i>
+                            </div>
+                            <div class="optimize-result">
+                                <h4><i class="fas fa-magic"></i> 优化建议</h4>
+                                <textarea id="optimize-result-text" rows="4"></textarea>
+                                <p class="optimize-hint" id="optimize-source-hint" style="display:none;"></p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" id="optimize-cancel-btn">
+                            <i class="fas fa-times"></i> 取消
+                        </button>
+                        <button class="btn btn-primary" id="optimize-confirm-btn">
+                            <i class="fas fa-check"></i> 确认使用
+                        </button>
                     </div>
                 </div>
             </div>
@@ -433,8 +492,19 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    document.getElementById('query-input').value = result.optimized_query;
-                    showSuccess('查询优化成功！');
+                    // 显示优化确认弹窗
+                    document.getElementById('optimize-original-text').textContent = query;
+                    document.getElementById('optimize-result-text').value = result.optimized_query;
+
+                    const hint = document.getElementById('optimize-source-hint');
+                    if (result.source === 'local') {
+                        hint.textContent = '⚠ 当前为本地词典扩展（AI 优化不可用），如需更精准的扩展请配置 API Key';
+                        hint.style.display = 'block';
+                    } else {
+                        hint.style.display = 'none';
+                    }
+
+                    document.getElementById('optimize-modal').style.display = 'flex';
                 } else {
                     throw new Error(result.error || '查询优化失败');
                 }
@@ -473,6 +543,8 @@
                     document.getElementById('code-explanation').style.display = 'none';
                     showSuccess('代码生成成功！');
                     loadQueryHistory();
+                    // 自动触发代码复核
+                    reviewCode(result.code, query);
                 } else {
                     throw new Error(result.error || '代码生成失败');
                 }
@@ -481,6 +553,105 @@
             } finally {
                 hideLoading();
             }
+        }
+
+        // ===== 代码复核 =====
+        let lastReviewQuery = '';
+        let lastReviewCode = '';
+        let reviewExpanded = false;
+
+        function toggleReviewPanel(expand) {
+            const body = document.getElementById('review-body');
+            const icon = document.querySelector('#review-panel-icon i');
+            if (!body || !icon) return;
+            if (expand === true || (expand === undefined && !reviewExpanded)) {
+                body.style.display = 'block';
+                icon.className = 'fas fa-chevron-down';
+                reviewExpanded = true;
+            } else if (expand === false || (expand === undefined && reviewExpanded)) {
+                body.style.display = 'none';
+                icon.className = 'fas fa-chevron-right';
+                reviewExpanded = false;
+            }
+        }
+
+        async function reviewCode(code, query) {
+            if (!code || !query) return;
+
+            lastReviewCode = code;
+            lastReviewQuery = query;
+
+            const reviewCard = document.getElementById('review-card');
+            const reviewLoading = document.getElementById('review-loading');
+            const reviewContent = document.getElementById('review-content');
+            const reviewError = document.getElementById('review-error');
+
+            // 显示复核卡片和加载状态
+            reviewCard.style.display = 'block';
+            reviewLoading.style.display = 'block';
+            reviewContent.style.display = 'none';
+            reviewError.style.display = 'none';
+            document.getElementById('review-status-badge').textContent = '';
+            toggleReviewPanel(true);
+
+            try {
+                const response = await fetch('/api/review-code', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code, query })
+                });
+                const result = await response.json();
+
+                reviewLoading.style.display = 'none';
+
+                if (result.success && result.review) {
+                    renderReview(result.review, result.model_used);
+                    reviewContent.style.display = 'block';
+                } else {
+                    reviewError.textContent = result.error || '复核请求失败';
+                    reviewError.style.display = 'block';
+                }
+            } catch (error) {
+                reviewLoading.style.display = 'none';
+                reviewError.textContent = '复核请求失败: ' + error.message;
+                reviewError.style.display = 'block';
+            }
+        }
+
+        function renderReview(review, modelUsed) {
+            const badge = document.getElementById('review-status-badge');
+            const summary = document.getElementById('review-summary');
+            const aspects = document.getElementById('review-aspects');
+            const modelInfo = document.getElementById('review-model-info');
+
+            // 状态徽标
+            badge.textContent = review.passed ? '√ 已通过' : '⚠ 需关注';
+            badge.className = 'review-status-badge ' + (review.passed ? 'review-status-pass' : 'review-status-fail');
+
+            // 摘要
+            summary.className = 'review-summary ' + (review.passed ? 'passed' : 'failed');
+            summary.innerHTML = '<strong>' + (review.passed ? '√' : '⚠') + ' 审查结论：</strong>' + (review.summary || '无摘要');
+
+            // 各维度
+            aspects.innerHTML = '';
+            if (review.aspects && review.aspects.length > 0) {
+                review.aspects.forEach(function(aspect) {
+                    const div = document.createElement('div');
+                    div.className = 'review-aspect';
+                    const passedClass = aspect.passed ? 'review-aspect-pass' : 'review-aspect-fail';
+                    const iconName = aspect.passed ? 'fa-check-circle' : 'fa-exclamation-triangle';
+                    div.innerHTML =
+                        '<div class="review-aspect-header ' + passedClass + '">' +
+                            '<i class="fas ' + iconName + '"></i>' +
+                            escapeHtml(aspect.name || '') +
+                        '</div>' +
+                        '<div class="review-aspect-reason">' + escapeHtml(aspect.reason || '') + '</div>';
+                    aspects.appendChild(div);
+                });
+            }
+
+            // 模型信息
+            modelInfo.textContent = modelUsed ? '复核模型：' + modelUsed : '';
         }
 
         // 解释代码
@@ -1074,6 +1245,9 @@
             // 代码编辑器展开/收起
             document.getElementById('code-editor-toggle').addEventListener('click', () => toggleEditor());
 
+            // 复核意见面板展开/收起
+            document.getElementById('review-toggle').addEventListener('click', () => toggleReviewPanel());
+
             // 加载数据信息
             loadDataInfo();
 
@@ -1135,7 +1309,23 @@
                 if (e.target === ruleModal) ruleModal.style.display = 'none';
             });
 
-            // 保存自定义规则
+            // 优化弹窗
+            const optimizeModal = document.getElementById('optimize-modal');
+            document.getElementById('optimize-modal-close').addEventListener('click', function() {
+                optimizeModal.style.display = 'none';
+            });
+            document.getElementById('optimize-cancel-btn').addEventListener('click', function() {
+                optimizeModal.style.display = 'none';
+            });
+            optimizeModal.addEventListener('click', function(e) {
+                if (e.target === optimizeModal) optimizeModal.style.display = 'none';
+            });
+            document.getElementById('optimize-confirm-btn').addEventListener('click', function() {
+                const optimizedText = document.getElementById('optimize-result-text').value;
+                document.getElementById('query-input').value = optimizedText;
+                optimizeModal.style.display = 'none';
+                showSuccess('查询优化成功！');
+            });
             document.getElementById('save-rule-btn').addEventListener('click', async function() {
                 const name = document.getElementById('rule-name').value.trim();
                 const desc = document.getElementById('rule-desc').value.trim();
@@ -1181,6 +1371,8 @@
             display: flex;
             flex-direction: column;
             gap: 20px;
+            min-width: 0;
+            overflow: hidden;
         }
 
         .query-main {
@@ -1196,6 +1388,8 @@
             border-radius: 8px;
             padding: 20px;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            min-width: 0;
+            max-width: 100%;
         }
 
         .data-info-card h4, .examples-card h4, .quick-actions h4 {
@@ -1594,6 +1788,8 @@
             padding: 16px;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
             margin-top: 12px;
+            min-width: 0;
+            max-width: 100%;
         }
         .history-card h4 {
             margin-bottom: 12px;
@@ -1627,6 +1823,8 @@
             cursor: pointer;
             transition: background 0.15s;
             border-bottom: 1px solid #f3f4f6;
+            overflow: hidden;
+            max-width: 100%;
         }
         .history-item:last-child {
             border-bottom: none;
@@ -1957,6 +2155,215 @@
         .rule-count {
             font-size: 11px;
             color: #9ca3af;
+        }
+        /* 优化弹窗 */
+        .optimize-modal-content {
+            width: 800px;
+        }
+        .optimize-modal-content .modal-footer {
+            padding: 14px 24px;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+        .optimize-compare {
+            display: flex;
+            gap: 16px;
+            align-items: stretch;
+        }
+        .optimize-original,
+        .optimize-result {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        .optimize-original h4,
+        .optimize-result h4 {
+            font-size: 14px;
+            color: #374151;
+            margin: 0 0 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .optimize-text {
+            background: #f8f9fa;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 12px;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #6b7280;
+            flex: 1;
+            overflow-y: auto;
+        }
+        .optimize-result textarea {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #3b82f6;
+            border-radius: 6px;
+            font-size: 14px;
+            line-height: 1.6;
+            resize: vertical;
+            min-height: 80px;
+            font-family: inherit;
+        }
+        .optimize-result textarea:focus {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+        }
+        .optimize-arrow {
+            display: flex;
+            align-items: center;
+            color: #9ca3af;
+            font-size: 20px;
+            padding-top: 28px;
+        }
+        .optimize-hint {
+            font-size: 12px;
+            color: #d97706;
+            margin: 6px 0 0;
+        }
+        @media (max-width: 640px) {
+            .optimize-compare {
+                flex-direction: column;
+            }
+            .optimize-arrow {
+                transform: rotate(90deg);
+                padding-top: 0;
+                justify-content: center;
+            }
+        }
+
+        /* 复核意见面板 */
+        .review-card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        .review-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 24px;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.15s;
+        }
+        .review-header:hover {
+            background: #f9fafb;
+        }
+        .review-header h3 {
+            margin: 0;
+            font-size: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #333;
+        }
+        .review-status-badge {
+            font-size: 11px;
+            padding: 2px 10px;
+            border-radius: 10px;
+            font-weight: normal;
+        }
+        .review-status-pass {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        .review-status-fail {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        .review-toggle-icon {
+            color: #9ca3af;
+            font-size: 14px;
+        }
+        .review-body {
+            padding: 0 24px 20px;
+            border-top: 1px solid #e5e7eb;
+        }
+        .review-loading {
+            text-align: center;
+            padding: 32px 0;
+            color: #6b7280;
+        }
+        .review-loading .spinner {
+            margin: 0 auto 12px;
+        }
+        .review-content {
+            padding-top: 16px;
+        }
+        .review-summary {
+            font-size: 14px;
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            line-height: 1.5;
+        }
+        .review-summary.passed {
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            color: #166534;
+        }
+        .review-summary.failed {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #991b1b;
+        }
+        .review-aspects {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .review-aspect {
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 12px 16px;
+        }
+        .review-aspect-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .review-aspect-header i {
+            font-size: 16px;
+        }
+        .review-aspect-pass {
+            color: #059669;
+        }
+        .review-aspect-fail {
+            color: #dc2626;
+        }
+        .review-aspect-reason {
+            font-size: 13px;
+            color: #4b5563;
+            line-height: 1.5;
+            padding-left: 24px;
+        }
+        .review-model-info {
+            font-size: 12px;
+            color: #9ca3af;
+            text-align: right;
+            padding-top: 8px;
+            border-top: 1px solid #f3f4f6;
+        }
+        .review-error {
+            padding: 16px;
+            color: #dc2626;
+            font-size: 13px;
+            background: #fef2f2;
+            border-radius: 6px;
+            margin-top: 12px;
+        }
+        .review-aspect-warn {
+            color: #d97706;
         }
     </style>
 </body>

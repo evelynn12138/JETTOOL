@@ -37,6 +37,10 @@ electron/build/
 # Claude
 .claude/
 
+# Virtual environment
+venv/
+.venv/
+
 # Environment
 .env
 *.env.local

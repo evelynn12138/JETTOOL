@@ -11,7 +11,7 @@
     <div class="container">
         <header class="header">
             <div class="logo">
-                <a href="{{ url_for('api_config_page') }}" class="back-link">
+                <a href="{{ url_for('field_mapper_page') }}" class="back-link">
                     <i class="fas fa-arrow-left"></i>
                 </a>
                 <i class="fas fa-check-double"></i>
@@ -24,11 +24,11 @@
                 </div>
                 <div class="step completed">
                     <span class="step-number">2</span>
-                    <span class="step-text">字段映射</span>
+                    <span class="step-text">API配置</span>
                 </div>
                 <div class="step completed">
                     <span class="step-number">3</span>
-                    <span class="step-text">API配置</span>
+                    <span class="step-text">字段映射</span>
                 </div>
                 <div class="step active">
                     <span class="step-number">4</span>
@@ -334,16 +334,29 @@
             // 底部操作按钮
             html += `
                 <div class="action-buttons" style="margin-top: 24px; display: flex; justify-content: space-between; align-items: center;">
-                    <button class="btn btn-secondary" onclick="exportResults()">
-                        <i class="fas fa-file-excel"></i> 导出Excel报告
-                    </button>
+                    <div>
+                        <button class="btn btn-secondary" onclick="exportResults()">
+                            <i class="fas fa-file-excel"></i> 导出Excel报告
+                        </button>
+                        ${!data.all_passed ? `<button class="btn btn-secondary" id="ai-analyze-btn" style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none;">
+                            <i class="fas fa-robot"></i> AI 差异分析
+                        </button>` : ''}
+                    </div>
                     <button class="btn btn-primary" onclick="goToQuery()">
                         <i class="fas fa-arrow-right"></i> 进入查询分析
                     </button>
                 </div>
+                <div id="ai-analysis-container" style="display: none;"></div>
             `;
 
             container.innerHTML = html;
+
+            // AI 分析按钮事件
+            const aiBtn = document.getElementById('ai-analyze-btn');
+            if (aiBtn) aiBtn.addEventListener('click', aiAnalyzeIntegrity);
+
+            // 异步刷新直接查询的结转损益金额
+            refreshDirectCfAmount();
 
             // 滚动到结果区域
             container.scrollIntoView({ behavior: 'smooth' });
@@ -548,7 +561,7 @@
                         </div>
                         <div class="detail-item">
                             <span class="detail-label">结转损益金额</span>
-                            <span class="detail-value value-warn">¥${formatNum(cf.cf_total_amount)}</span>
+                            <span class="detail-value value-warn" id="cf-total-amount">¥${formatNum(cf.cf_total_amount)}</span>
                         </div>
                         <div class="detail-item">
                             <span class="detail-label">序时账剔除行数</span>
@@ -565,6 +578,143 @@
                 html += `<div class="balance-check check-fail"><i class="fas fa-exclamation-circle"></i> 反结转执行异常：${cf.error}，已回退使用原始数据</div>`;
             }
             return html;
+        }
+
+        // 通过直接查询获取结转损益金额（仅 4103/结转+损益 的匹配行，不含整张凭证的其他行）
+        async function refreshDirectCfAmount() {
+            const sqlWithDir = 'SELECT COALESCE(SUM(CASE WHEN "方向" IN (\'借\', \'Debit\', \'D\') THEN CAST("金额" AS DOUBLE) ELSE -CAST("金额" AS DOUBLE) END), 0) AS amount FROM "data" WHERE CAST("科目编号" AS VARCHAR) = \'4103\' OR ("摘要" LIKE \'%结转%\' AND "摘要" LIKE \'%损益%\')';
+            const sqlSimple = 'SELECT COALESCE(SUM(CAST("金额" AS DOUBLE)), 0) AS amount FROM "data" WHERE CAST("科目编号" AS VARCHAR) = \'4103\' OR ("摘要" LIKE \'%结转%\' AND "摘要" LIKE \'%损益%\')';
+            try {
+                const resp = await fetch('/api/execute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code: sqlWithDir })
+                });
+                const result = await resp.json();
+                if (result.success && result.result) {
+                    const val = result.result.type === 'scalar' ? result.result.value
+                        : (result.result.data && result.result.data.length > 0 ? result.result.data[0].amount : null);
+                    if (val != null) {
+                        const el = document.getElementById('cf-total-amount');
+                        if (el) el.textContent = '¥' + formatNum(val);
+                        return;
+                    }
+                }
+            } catch (e) {}
+            try {
+                const resp = await fetch('/api/execute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code: sqlSimple })
+                });
+                const result = await resp.json();
+                if (result.success && result.result) {
+                    const val = result.result.type === 'scalar' ? result.result.value
+                        : (result.result.data && result.result.data.length > 0 ? result.result.data[0].amount : null);
+                    if (val != null) {
+                        const el = document.getElementById('cf-total-amount');
+                        if (el) el.textContent = '¥' + formatNum(val);
+                    }
+                }
+            } catch (e) {
+                console.error('直接查询结转损益金额失败:', e);
+            }
+        }
+
+        // ===== AI 差异分析 =====
+        async function aiAnalyzeIntegrity() {
+            const btn = document.getElementById('ai-analyze-btn');
+            const container = document.getElementById('ai-analysis-container');
+            if (!btn || !container) return;
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 分析中...';
+            container.style.display = 'block';
+            container.innerHTML = '<div class="ai-analysis-loading"><div class="spinner"></div><p>AI 正在分析异常原因，请稍候...</p></div>';
+
+            try {
+                const resp = await fetch('/api/integrity-test/ai-analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const result = await resp.json();
+
+                if (result.success && result.analysis) {
+                    container.innerHTML = renderAiAnalysis(result.analysis);
+                } else {
+                    container.innerHTML = `<div class="balance-check check-fail"><i class="fas fa-exclamation-circle"></i> ${result.error || '分析失败'}</div>`;
+                }
+            } catch (e) {
+                container.innerHTML = `<div class="balance-check check-fail"><i class="fas fa-exclamation-circle"></i> AI 分析请求失败: ${e.message}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-robot"></i> AI 差异分析';
+            }
+        }
+
+        function renderAiAnalysis(text) {
+            // 按测试分割（### 开头为分割点）
+            const sections = text.split(/(?=### )/).filter(s => s.trim());
+            if (sections.length === 0) {
+                return `<div class="ai-analysis-card"><div class="ai-analysis-body">${escapeHtml(text).replace(/\n/g, '<br>')}</div></div>`;
+            }
+
+            return sections.map(section => {
+                // 提取标题行
+                const lines = section.split('\n').filter(l => l.trim());
+                const titleLine = lines.find(l => l.startsWith('### ')) || '';
+                const title = titleLine.replace(/^###\s*/, '').trim();
+                const bodyLines = lines.filter(l => !l.startsWith('### '));
+
+                // 分隔可能原因和建议
+                let causesHtml = '';
+                let actionsHtml = '';
+                let currentSection = '';
+                let causeLines = [];
+                let actionLines = [];
+
+                bodyLines.forEach(line => {
+                    if (line.startsWith('**可能原因**') || line.startsWith('**异常情况**')) {
+                        currentSection = 'causes';
+                    } else if (line.startsWith('**建议后续操作**') || line.startsWith('**建议**')) {
+                        currentSection = 'actions';
+                        if (causeLines.length) {
+                            causesHtml = '<ul>' + causeLines.map(c => `<li>${c.replace(/^-\s*/, '').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</li>`).join('') + '</ul>';
+                            causeLines = [];
+                        }
+                    } else if (currentSection === 'causes') {
+                        causeLines.push(line);
+                    } else if (currentSection === 'actions') {
+                        actionLines.push(line);
+                    }
+                });
+                if (causeLines.length) {
+                    causesHtml = '<ul>' + causeLines.map(c => `<li>${c.replace(/^-\s*/, '').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</li>`).join('') + '</ul>';
+                }
+                if (actionLines.length) {
+                    actionsHtml = '<ul>' + actionLines.map(a => `<li>${a.replace(/^-\s*/, '').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</li>`).join('') + '</ul>';
+                }
+
+                return `
+                    <div class="ai-analysis-card">
+                        <div class="ai-analysis-header">
+                            <i class="fas fa-robot"></i>
+                            <h4>${escapeHtml(title)}</h4>
+                        </div>
+                        <div class="ai-analysis-body">
+                            ${causesHtml ? `<div class="ai-analysis-section"><h5><i class="fas fa-search"></i> 可能原因</h5>${causesHtml}</div>` : ''}
+                            ${actionsHtml ? `<div class="ai-analysis-section"><h5><i class="fas fa-tools"></i> 建议后续操作</h5>${actionsHtml}</div>` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const d = document.createElement('div');
+            d.textContent = text;
+            return d.innerHTML;
         }
 
         function formatNum(num) {
@@ -1029,6 +1179,74 @@
             flex: 1;
             font-size: 16px;
             color: #2563eb;
+        }
+        /* AI 差异分析 */
+        .ai-analysis-loading {
+            text-align: center;
+            padding: 40px 20px;
+            color: #6b7280;
+        }
+        .ai-analysis-loading .spinner {
+            margin: 0 auto 16px;
+        }
+        .ai-analysis-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            border-left: 4px solid #667eea;
+        }
+        .ai-analysis-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .ai-analysis-header i {
+            font-size: 20px;
+            color: #667eea;
+        }
+        .ai-analysis-header h4 {
+            font-size: 16px;
+            color: #333;
+            margin: 0;
+        }
+        .ai-analysis-body {
+            color: #4b5563;
+            font-size: 14px;
+            line-height: 1.7;
+        }
+        .ai-analysis-section {
+            margin-bottom: 12px;
+        }
+        .ai-analysis-section:last-child {
+            margin-bottom: 0;
+        }
+        .ai-analysis-section h5 {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 14px;
+            color: #374151;
+            margin: 0 0 8px 0;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        .ai-analysis-section h5 i {
+            font-size: 14px;
+            color: #667eea;
+        }
+        .ai-analysis-section ul {
+            margin: 0;
+            padding-left: 18px;
+        }
+        .ai-analysis-section li {
+            margin-bottom: 6px;
+            line-height: 1.6;
+        }
+        .ai-analysis-section li:last-child {
+            margin-bottom: 0;
         }
     </style>
 </body>

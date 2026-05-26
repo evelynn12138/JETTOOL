@@ -103,7 +103,7 @@
     <div class="container">
         <header class="header">
             <div class="logo">
-                <a href="{{ url_for('upload_page') }}" class="back-link">
+                <a href="{{ url_for('api_config_page') }}" class="back-link">
                     <i class="fas fa-arrow-left"></i>
                 </a>
                 <i class="fas fa-project-diagram"></i>
@@ -114,13 +114,13 @@
                     <span class="step-number">1</span>
                     <span class="step-text">上传文件</span>
                 </div>
-                <div class="step active">
+                <div class="step completed">
                     <span class="step-number">2</span>
-                    <span class="step-text">字段映射</span>
-                </div>
-                <div class="step">
-                    <span class="step-number">3</span>
                     <span class="step-text">API配置</span>
+                </div>
+                <div class="step active">
+                    <span class="step-number">3</span>
+                    <span class="step-text">字段映射</span>
                 </div>
                 <div class="step">
                     <span class="step-number">4</span>
@@ -197,6 +197,9 @@
                     <div class="mapping-toolbar">
                         <button class="btn btn-small" id="auto-map-btn">
                             <i class="fas fa-magic"></i> 智能重新映射
+                        </button>
+                        <button class="btn btn-small" id="ai-auto-map-btn" style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none;">
+                            <i class="fas fa-robot"></i> AI 智能映射
                         </button>
                         <button class="btn btn-small" id="reset-btn">
                             <i class="fas fa-undo"></i> 重置
@@ -275,7 +278,7 @@
 
             <!-- 底部操作按钮 -->
             <div class="action-buttons">
-                <button class="btn btn-secondary" onclick="window.location.href='{{ url_for('upload_page') }}'">
+                <button class="btn btn-secondary" onclick="window.location.href='{{ url_for('api_config_page') }}'">
                     <i class="fas fa-arrow-left"></i> 返回上一步
                 </button>
                 <button class="btn btn-primary" id="save-mapping-btn">
@@ -667,7 +670,11 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    window.location.href = '/api-config';
+                    if (result.has_balance_data) {
+                        window.location.href = '/integrity-test';
+                    } else {
+                        window.location.href = '/query';
+                    }
                 } else {
                     alert('保存失败: ' + (result.error || '未知错误'));
                 }
@@ -675,6 +682,80 @@
                 alert('保存失败: ' + error.message);
             } finally {
                 document.getElementById('loading-overlay').style.display = 'none';
+            }
+        }
+
+        // ===== AI 智能映射 =====
+        async function aiAutoMap() {
+            const btn = document.getElementById('ai-auto-map-btn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 映射中...';
+
+            try {
+                const journalFields = userFields.map(f => ({
+                    name: f.name,
+                    type: f.type,
+                    sample: (previewData && previewData.length > 0) ? previewData[0][f.name] : null
+                }));
+
+                const payload = {
+                    journal_fields: journalFields,
+                    journal_standard_fields: standardFields.map(f => ({
+                        id: f.id, name: f.name, description: f.description, type: f.type
+                    }))
+                };
+
+                if (hasBalance) {
+                    payload.balance_fields = balanceUserFields.map(f => ({
+                        name: f.name,
+                        type: f.type,
+                        sample: (balancePreviewData && balancePreviewData.length > 0) ? balancePreviewData[0][f.name] : null
+                    }));
+                    payload.balance_standard_fields = balanceStandardFields.map(f => ({
+                        id: f.id, name: f.name, description: f.description, type: f.type
+                    }));
+                }
+
+                const response = await fetch('/api/auto-map-fields', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // Apply journal mapping
+                    if (result.journal_mapping) {
+                        Object.entries(result.journal_mapping).forEach(([stdId, sourceName]) => {
+                            const select = document.querySelector(`#journal-mapping-body select[data-std-field="${stdId}"]`);
+                            if (select) {
+                                select.value = sourceName;
+                                const event = new Event('change', { bubbles: true });
+                                select.dispatchEvent(event);
+                            }
+                        });
+                    }
+                    // Apply balance mapping
+                    if (result.balance_mapping && hasBalance) {
+                        Object.entries(result.balance_mapping).forEach(([stdId, sourceName]) => {
+                            const select = document.querySelector(`#balance-mapping-body select[data-std-field="${stdId}"]`);
+                            if (select) {
+                                select.value = sourceName;
+                                const event = new Event('change', { bubbles: true });
+                                select.dispatchEvent(event);
+                            }
+                        });
+                    }
+                    alert('AI 智能映射完成！请检查映射结果，确认后点击"保存映射并继续"。');
+                } else {
+                    alert('AI 映射失败: ' + (result.error || '未知错误'));
+                }
+            } catch (error) {
+                alert('AI 映射失败: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-robot"></i> AI 智能映射';
             }
         }
 
@@ -742,6 +823,12 @@
 
             // 保存
             document.getElementById('save-mapping-btn').addEventListener('click', saveMapping);
+
+            // AI 智能映射
+            const aiBtn = document.getElementById('ai-auto-map-btn');
+            if (aiBtn) {
+                aiBtn.addEventListener('click', aiAutoMap);
+            }
         });
     </script>
 </body>

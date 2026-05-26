@@ -3,6 +3,7 @@ import os
 import time
 import uuid
 import json as json_module
+import re
 import numpy as np
 from config import Config
 
@@ -245,6 +246,9 @@ def field_mapper_page():
     if not data_info:
         return redirect(url_for('upload_page'))
 
+    if not session.get('api_key'):
+        return redirect(url_for('api_config_page'))
+
     balance_data_info = session.get('balance_data_info')
     has_balance = bool(balance_data_info)
 
@@ -484,6 +488,137 @@ def export_integrity_results():
         app.logger.error(f"[EXPORT ERROR] {str(e)}\n{traceback.format_exc()}")
         return jsonify({'success': False, 'error': f'导出失败: {str(e)}'})
 
+
+@app.route('/api/integrity-test/ai-analyze', methods=['POST'])
+def ai_analyze_integrity():
+    """AI 分析完整性测试异常结果 — 从审计视角分析原因并给出建议"""
+    results = session.get('integrity_results')
+    api_key = session.get('api_key')
+
+    if not results:
+        return jsonify({'success': False, 'error': '没有完整性测试结果'})
+    if not api_key:
+        return jsonify({'success': False, 'error': '请先配置 API Key'})
+    if results.get('all_passed'):
+        return jsonify({'success': False, 'error': '所有测试均已通过'})
+
+    try:
+        provider = session.get('ai_provider', 'deepseek')
+        model = session.get('ai_model')
+        plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
+        provider_config = Config.AI_PROVIDERS.get(provider, Config.AI_PROVIDERS["deepseek"])
+        api_url = provider_config["api_url"]
+        model_name = model or provider_config["model"]
+
+        # ---- 构建 prompt ----
+        lines = [
+            "你是一名资深的财务审计专家。以下是财务数据完整性测试的结果，请从审计专业角度逐项分析异常原因，并给出后续建议。",
+            "",
+            "## 测试汇总",
+        ]
+        summary = results.get('summary', {})
+        lines.append(f"- 总测试数: {summary.get('total', 3)}")
+        lines.append(f"- 完成: {summary.get('completed', 0)}  错误: {summary.get('errors', 0)}  跳过: {summary.get('skipped', 0)}")
+        if results.get('reverse_carry_forward_applied'):
+            lines.append("- 已启用反结转模式")
+        if results.get('leaf_accounts_applied'):
+            lines.append("- 已启用末级科目筛选")
+
+        cf_info = results.get('carry_forward_info')
+        if cf_info and cf_info.get('error'):
+            lines.append(f"\n⚠ 反结转执行异常: {cf_info['error']}")
+        lines.append("")
+
+        for test_key, test_label in [
+            ('journal_test', '测试一：序时账完整性'),
+            ('balance_test', '测试二：科目余额表完整性'),
+            ('cross_test', '测试三：交叉验证'),
+        ]:
+            test = results.get('results', {}).get(test_key, {})
+            if not test or test.get('status') != 'completed' or test.get('passed'):
+                continue
+
+            details = test.get('details', {})
+            lines.append(f"### {test_label}")
+            lines.append(f"说明: {test.get('message', '')}")
+
+            if test_key == 'journal_test':
+                lines.append(f"汇总金额: {details.get('total_amount', 0)}")
+                lines.append(f"正数/负数/零值分组: {details.get('positive_groups', 0)} / {details.get('negative_groups', 0)} / {details.get('zero_groups', 0)}")
+                preview = details.get('groups_preview', [])
+                non_zero = [g for g in preview if abs(g.get('汇总发生额', 0) or 0) > 0.01]
+                if non_zero:
+                    lines.append(f"非零分组（前 {min(10, len(non_zero))} 条）：")
+                    for g in non_zero[:10]:
+                        lines.append(f"  公司:{g.get('公司名','')} 凭证:{g.get('凭证号','')} 日期:{g.get('日期','')} 金额:{g.get('汇总发生额',0)}")
+                    total_groups = details.get('total_groups', 0)
+                    if total_groups > 10:
+                        lines.append(f"  ...共 {total_groups} 个分组")
+
+            elif test_key == 'balance_test':
+                lines.append(f"期初余额合计: {details.get('total_beginning', 0)}")
+                lines.append(f"期末余额合计: {details.get('total_ending', 0)}")
+                lines.append(f"发生额合计(期末-期初): {details.get('total_occurrence', 0)}")
+                lines.append(f"发生额归零检查: {'通过' if details.get('balance_check_passed') else '异常'}")
+
+            elif test_key == 'cross_test':
+                lines.append(f"汇总科目数: {details.get('total_accounts', 0)}")
+                lines.append(f"差异数量: {details.get('difference_count', 0)}")
+                lines.append(f"仅有序时账: {details.get('only_in_journal', 0)}")
+                lines.append(f"仅有余额表: {details.get('only_in_balance', 0)}")
+                lines.append(f"序时账发生额合计: {details.get('journal_total_amount', 0)}")
+                lines.append(f"余额表发生额合计: {details.get('balance_total_occurrence', 0)}")
+                diff_records = details.get('diff_records', [])
+                if diff_records:
+                    lines.append(f"差异明细（前 {min(10, len(diff_records))} 条，共 {details.get('difference_count', 0)} 条）：")
+                    for r in diff_records[:10]:
+                        lines.append(f"  公司:{r.get('公司名','')} 科目:{r.get('科目编号','')} {r.get('科目名称','')}  序时账发生额:{r.get('序时账发生额',0)}  余额表发生额:{r.get('余额表发生额',0)}  差异:{r.get('差异',0)}")
+            lines.append("")
+
+        lines.extend([
+            "请按以下格式输出分析结果，每个有异常的测试单独分析：",
+            "",
+            "### [测试名称]",
+            "**异常情况**：（简要描述问题）",
+            "**可能原因**：（从审计专业视角分析，例如）",
+            "- 财务系统导出问题（导出范围不完整、借贷方向不一致、未包含所有期间等）",
+            "- 数据自身问题（某月未做损益结转、凭证借贷不平时手工调账、缺少部分科目等）",
+            "- 用户配置问题（字段映射错误、期初期末余额方向未正确处理、反结转条件不适配等）",
+            "- 会计处理差异（SAP/金蝶/用友等不同系统的特有处理方式）",
+            "**建议后续操作**：（列出 1-3 条可操作的审计建议）",
+            "",
+            "注意：已通过或跳过的测试不要分析。语言专业简洁，用中文。",
+        ])
+        prompt = "\n".join(lines)
+
+        # ---- 调用 AI ----
+        import requests as http_req
+        headers = {
+            "Authorization": f"Bearer {plain_key}",
+            "Content-Type": "application/json",
+        }
+        req_data = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": "你是一名资深的财务审计专家，擅长从审计视角分析财务数据问题。"},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.3,
+            "max_tokens": 2000,
+        }
+        resp = http_req.post(api_url, headers=headers, json=req_data, timeout=60)
+        if resp.status_code != 200:
+            return jsonify({'success': False, 'error': f'AI 请求失败: {resp.status_code}'})
+
+        content = resp.json()['choices'][0]['message']['content'].strip()
+        return jsonify({'success': True, 'analysis': content})
+
+    except Exception as e:
+        import traceback
+        app.logger.error(f"[AI-ANALYZE-INTEGRITY] {str(e)}\n{traceback.format_exc()}")
+        return jsonify({'success': False, 'error': f'AI 分析失败: {str(e)}'})
+
+
 @app.route('/api/configure-fields', methods=['POST'])
 def configure_fields():
     """API: 配置字段映射（序时账 + 科目余额表）"""
@@ -666,6 +801,109 @@ def configure_fields():
         'message': '字段映射已保存并应用',
         'has_balance_data': has_balance
     })
+
+
+@app.route('/api/auto-map-fields', methods=['POST'])
+def auto_map_fields():
+    """AI 自动字段映射 — 调用 AI 根据列名、类型、样本值推荐映射"""
+    data = request.json
+    api_key = session.get('api_key')
+
+    if not api_key:
+        return jsonify({'success': False, 'error': '请先配置 API Key'})
+
+    journal_fields = data.get('journal_fields', [])
+    journal_standard = data.get('journal_standard_fields', [])
+    balance_fields = data.get('balance_fields', [])
+    balance_standard = data.get('balance_standard_fields', [])
+
+    if not journal_fields or not journal_standard:
+        return jsonify({'success': False, 'error': '字段信息不完整'})
+
+    try:
+        provider = session.get('ai_provider', 'deepseek')
+        model = session.get('ai_model')
+        plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
+        provider_config = Config.AI_PROVIDERS.get(provider, Config.AI_PROVIDERS["deepseek"])
+        api_url = provider_config["api_url"]
+        model_name = model or provider_config["model"]
+
+        # Build prompt
+        lines = [
+            "你是一个数据工程师，负责将用户上传的Excel列映射到标准字段。",
+            "根据列名、数据类型和样本值推断每列的含义，映射到最合适的标准字段。",
+            "",
+            "## 用户序时账列",
+        ]
+        for f in journal_fields:
+            lines.append(f"- {f['name']} (类型: {f['type']}, 样本: {f.get('sample', 'N/A')})")
+
+        lines.extend(["", "## 标准字段（序时账）"])
+        for f in journal_standard:
+            lines.append(f"- {f['id']}: {f['name']} — {f['description']} (类型: {f['type']})")
+
+        if balance_fields and balance_standard:
+            lines.extend(["", "## 用户科目余额表列"])
+            for f in balance_fields:
+                lines.append(f"- {f['name']} (类型: {f['type']}, 样本: {f.get('sample', 'N/A')})")
+
+            lines.extend(["", "## 标准字段（科目余额表）"])
+            for f in balance_standard:
+                lines.append(f"- {f['id']}: {f['name']} — {f['description']} (类型: {f['type']})")
+
+        lines.extend([
+            "",
+            "返回纯 JSON，不要 Markdown 包裹。格式：",
+            '{ "journal_mapping": { "date": "用户列名", ... }, "balance_mapping": { ... } }',
+            "映射不确认的字段就省略，balance_mapping 无数据时返回 {}。",
+        ])
+        prompt = "\n".join(lines)
+
+        # Call AI
+        import requests as http_req
+        headers = {
+            "Authorization": f"Bearer {plain_key}",
+            "Content-Type": "application/json"
+        }
+        req_data = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": "你只返回 JSON，不加 Markdown 代码块。"},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.1,
+            "max_tokens": 2000,
+        }
+        resp = http_req.post(api_url, headers=headers, json=req_data, timeout=30)
+        if resp.status_code != 200:
+            return jsonify({'success': False, 'error': f'AI 请求失败: {resp.status_code}'})
+
+        content = resp.json()['choices'][0]['message']['content'].strip()
+
+        # Strip markdown code block wrappers if present
+        if content.startswith('```'):
+            content = re.sub(r'^```(?:json)?\s*', '', content)
+            content = re.sub(r'\s*```$', '', content)
+            content = content.strip()
+
+        # Find the first JSON object
+        brace_start = content.find('{')
+        brace_end = content.rfind('}')
+        if brace_start >= 0 and brace_end >= 0:
+            content = content[brace_start:brace_end + 1]
+
+        mapping_result = json_module.loads(content)
+
+        return jsonify({
+            'success': True,
+            'journal_mapping': mapping_result.get('journal_mapping', {}),
+            'balance_mapping': mapping_result.get('balance_mapping', {})
+        })
+
+    except Exception as e:
+        import traceback
+        app.logger.error(f"[AUTO-MAP-FIELDS] {str(e)}\n{traceback.format_exc()}")
+        return jsonify({'success': False, 'error': f'AI 自动映射失败: {str(e)}'})
 
 
 @app.route('/api/mapping-history/check', methods=['GET'])
@@ -945,6 +1183,23 @@ def configure_api():
     if model:
         session['ai_model'] = model
 
+    # 复核模型配置（可选）
+    if 'review_api_key' in data:
+        rk = data['review_api_key']
+        if rk:
+            session['review_api_key'] = crypto_encrypt(rk, Config.SECRET_KEY)
+        else:
+            session.pop('review_api_key', None)
+    if 'review_provider' in data:
+        rp = data['review_provider']
+        session['review_provider'] = rp if rp else None
+    if 'review_model' in data:
+        rm = data['review_model']
+        session['review_model'] = rm if rm else None
+    if 'review_api_url' in data:
+        ru = data['review_api_url']
+        session['review_api_url'] = ru if ru else None
+
     has_balance = bool(session.get('balance_data_info'))
 
     return jsonify({
@@ -953,6 +1208,116 @@ def configure_api():
         'has_balance_data': has_balance,
         'pre_configured': session.get('api_key_source') == 'builtin',
     })
+
+@app.route('/api/review-code', methods=['POST'])
+def review_code():
+    """API: 复核 AI 生成的 SQL 代码 — 由第二 AI 模型（或同级模型）从语法、安全、意图、性能四个维度审查"""
+    data = request.json
+    code = data.get('code', '')
+    query = data.get('query', '')
+
+    if not code:
+        return jsonify({'success': False, 'error': '代码不能为空'})
+
+    api_key = session.get('review_api_key') or session.get('api_key')
+    if not api_key:
+        return jsonify({'success': False, 'error': '请先配置 API Key（主模型或复核模型）'})
+
+    try:
+        provider = session.get('review_provider') or session.get('ai_provider', 'deepseek')
+        model = session.get('review_model') or session.get('ai_model')
+        review_api_url = session.get('review_api_url')
+
+        plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
+        provider_config = Config.AI_PROVIDERS.get(provider, Config.AI_PROVIDERS["deepseek"])
+        api_url = review_api_url or provider_config["api_url"]
+        model_name = model or provider_config["model"]
+
+        # 获取字段信息用于上下文
+        data_info = session.get('data_info', {})
+        fields = data_info.get('mapped_fields', data_info.get('fields', []))
+        fields_desc = "\n".join([f"- {f['name']} ({f['type']})" for f in fields[:20]])
+
+        prompt = f"""你是一名资深的财务数据 SQL 审查专家。请从以下四个维度审查 AI 生成的 DuckDB SQL 代码。
+
+## 用户查询
+{query}
+
+## 生成的 SQL 代码
+```sql
+{code}
+```
+
+## 数据表字段
+{fields_desc or '（无详细字段信息）'}
+
+## 审查维度
+1. **语法检查** — 是否符合 DuckDB SQL 语法？
+2. **安全审查** — 是否仅包含 SELECT 只读操作？有无危险语句？
+3. **意图匹配** — SQL 逻辑是否准确反映了用户的查询需求？
+4. **性能优化** — 是否有明显的性能问题？能否优化？
+
+## 输出格式
+请输出以下 JSON 格式，注意必须是合法的 JSON，不要包含 Markdown 代码块包裹：
+{{
+  "passed": true/false,
+  "summary": "一句话总结审查结论",
+  "aspects": [
+    {{"name": "语法检查", "passed": true/false, "reason": "详细说明"}},
+    {{"name": "安全审查", "passed": true/false, "reason": "详细说明"}},
+    {{"name": "意图匹配", "passed": true/false, "reason": "详细说明"}},
+    {{"name": "性能优化", "passed": true/false, "reason": "详细说明"}}
+  ]
+}}"""
+
+        import requests as http_req
+        headers = {
+            "Authorization": f"Bearer {plain_key}",
+            "Content-Type": "application/json",
+        }
+        req_data = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": "你是一名资深的 SQL 审查专家。只输出 JSON，不要加 Markdown 代码块包裹。"},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.1,
+            "max_tokens": 1500,
+        }
+        resp = http_req.post(api_url, headers=headers, json=req_data, timeout=60)
+        if resp.status_code != 200:
+            return jsonify({'success': False, 'error': f'复核请求失败: {resp.status_code}'})
+
+        content = resp.json()['choices'][0]['message']['content'].strip()
+
+        # 清理 Markdown 包裹
+        if content.startswith('```'):
+            content = re.sub(r'^```(?:json)?\s*', '', content)
+            content = re.sub(r'\s*```$', '', content)
+            content = content.strip()
+
+        # 提取 JSON 对象
+        brace_start = content.find('{')
+        brace_end = content.rfind('}')
+        if brace_start >= 0 and brace_end >= 0:
+            content = content[brace_start:brace_end + 1]
+
+        review_result = json_module.loads(content)
+
+        return jsonify({
+            'success': True,
+            'review': review_result,
+            'model_used': model_name,
+        })
+
+    except Exception as e:
+        import traceback
+        app.logger.error(f"[REVIEW-CODE] {str(e)}\n{traceback.format_exc()}")
+        return jsonify({
+            'success': False,
+            'error': f'代码复核失败: {str(e)}',
+        })
+
 
 @app.route('/api/generate-code', methods=['POST'])
 def generate_code():
@@ -1045,26 +1410,56 @@ def query_history():
 
 @app.route('/api/optimize-query', methods=['POST'])
 def optimize_query():
-    """API: 优化自然语言查询"""
+    """API: 优化自然语言查询（本地词典 + AI 同义词扩展）"""
     data = request.json
     query = data.get('query')
 
     if not query:
         return jsonify({'success': False, 'error': '查询语句不能为空'})
 
+    # 1. 本地词典初步扩展
+    from modules.synonym_dict import expand_keywords, find_keywords
+    local_expanded = expand_keywords(query)
+    expanded_terms = [m['standard'] for m in find_keywords(query)]
+
+    # 2. AI 二次扩展
     api_key = session.get('api_key')
     if not api_key:
-        return jsonify({'success': False, 'error': '请先配置API Key'})
+        # 无 API Key 时返回本地扩展结果
+        return jsonify({
+            'success': True,
+            'original_query': query,
+            'local_expanded': local_expanded,
+            'optimized_query': local_expanded,
+            'expanded_terms': expanded_terms,
+            'source': 'local'
+        })
 
     try:
         provider = session.get('ai_provider', 'deepseek')
         model = session.get('ai_model')
         plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
         generator = AICodeGenerator(plain_key, provider=provider, model=model)
-        optimized = generator.optimize_query(query)
-        return jsonify({'success': True, 'optimized_query': optimized})
+        ai_optimized = generator.optimize_query(query, local_expanded=local_expanded)
+        return jsonify({
+            'success': True,
+            'original_query': query,
+            'local_expanded': local_expanded,
+            'optimized_query': ai_optimized,
+            'expanded_terms': expanded_terms,
+            'source': 'ai'
+        })
     except Exception as e:
-        return jsonify({'success': False, 'error': f'查询优化失败: {str(e)}'})
+        # AI 失败时降级到本地扩展
+        return jsonify({
+            'success': True,
+            'original_query': query,
+            'local_expanded': local_expanded,
+            'optimized_query': local_expanded,
+            'expanded_terms': expanded_terms,
+            'source': 'local',
+            'warning': f'AI 优化失败，已使用本地词典扩展: {str(e)}'
+        })
 
 
 @app.route('/api/explain-code', methods=['POST'])

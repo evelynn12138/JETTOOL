@@ -11,7 +11,7 @@
     <div class="container">
         <header class="header">
             <div class="logo">
-                <a href="{{ url_for('field_mapper_page') }}" class="back-link">
+                <a href="{{ url_for('upload_page') }}" class="back-link">
                     <i class="fas fa-arrow-left"></i>
                 </a>
                 <i class="fas fa-key"></i>
@@ -22,13 +22,13 @@
                     <span class="step-number">1</span>
                     <span class="step-text">上传文件</span>
                 </div>
-                <div class="step completed">
-                    <span class="step-number">2</span>
-                    <span class="step-text">字段映射</span>
-                </div>
                 <div class="step active">
-                    <span class="step-number">3</span>
+                    <span class="step-number">2</span>
                     <span class="step-text">API配置</span>
+                </div>
+                <div class="step">
+                    <span class="step-number">3</span>
+                    <span class="step-text">字段映射</span>
                 </div>
                 <div class="step">
                     <span class="step-number">4</span>
@@ -140,8 +140,64 @@
                     </div>
                 </div>
 
+                <!-- 复核模型配置（可选） -->
+                <div class="review-config-section">
+                    <div class="review-config-header" id="review-config-toggle">
+                        <h4><i class="fas fa-clipboard-check"></i> 复核模型配置 <span class="review-badge">可选</span></h4>
+                        <span class="review-toggle-icon" id="review-toggle-icon">
+                            <i class="fas fa-chevron-right"></i>
+                        </span>
+                    </div>
+                    <div class="review-config-body" id="review-config-body" style="display: none;">
+                        <p class="config-description" style="margin-bottom: 16px;">
+                            配置第二 AI 模型自动复核主模型生成的 SQL 代码，从语法、安全、意图、性能四个维度进行审查。
+                            留空则使用主模型进行复核。
+                        </p>
+
+                        <div class="form-group">
+                            <label for="review-provider-select">
+                                <i class="fas fa-cloud"></i> 复核 AI 服务商
+                            </label>
+                            <select id="review-provider-select" class="api-input">
+                                <option value="">使用主模型（不单独配置）</option>
+                            </select>
+                        </div>
+
+                        <div id="review-api-key-group" style="display: none;">
+                            <div class="form-group">
+                                <label for="review-api-key">
+                                    <i class="fas fa-key"></i> 复核模型 API Key
+                                </label>
+                                <div class="input-with-button">
+                                    <input type="password" id="review-api-key" placeholder="留空则使用主模型的 API Key" class="api-input">
+                                    <button class="btn btn-small" id="review-toggle-visibility">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="review-model-name">
+                                <i class="fas fa-tag"></i> 复核模型名称
+                            </label>
+                            <input type="text" id="review-model-name" placeholder="留空使用服务商默认模型" class="api-input">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="review-api-url">
+                                <i class="fas fa-link"></i> 复核 API 地址（可选）
+                            </label>
+                            <input type="text" id="review-api-url" placeholder="留空使用服务商默认地址" class="api-input">
+                            <p class="form-hint">
+                                自定义 API 端点，适用于代理或兼容 OpenAI 接口的自托管服务
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="action-buttons">
-                    <button class="btn btn-secondary" onclick="window.location.href='{{ url_for('field_mapper_page') }}'">
+                    <button class="btn btn-secondary" onclick="window.location.href='{{ url_for('upload_page') }}'">
                         <i class="fas fa-arrow-left"></i> 返回上一步
                     </button>
                     <button class="btn btn-primary" id="save-api-btn">
@@ -197,6 +253,9 @@
         let providers = [];
         let selectedProvider = null;
         let preConfiguredIds = new Set();
+        let reviewProviders = [];
+        let reviewSelectedProvider = null;
+        let reviewPreConfiguredIds = new Set();
 
         // ====== DOM 引用 ======
         const providerSelect = document.getElementById('provider-select');
@@ -215,6 +274,15 @@
         const testStatus = document.getElementById('test-status');
         const saveApiBtn = document.getElementById('save-api-btn');
         const loadingOverlay = document.getElementById('loading-overlay');
+        const reviewToggle = document.getElementById('review-config-toggle');
+        const reviewConfigBody = document.getElementById('review-config-body');
+        const reviewToggleIcon = document.getElementById('review-toggle-icon');
+        const reviewProviderSelect = document.getElementById('review-provider-select');
+        const reviewApiKeyGroup = document.getElementById('review-api-key-group');
+        const reviewApiKeyInput = document.getElementById('review-api-key');
+        const reviewModelInput = document.getElementById('review-model-name');
+        const reviewApiUrlInput = document.getElementById('review-api-url');
+        const reviewToggleVisBtn = document.getElementById('review-toggle-visibility');
 
         let isVisible = false;
 
@@ -225,8 +293,12 @@
                 const data = await res.json();
                 if (data.success) {
                     providers = data.providers;
+                    reviewProviders = data.providers;
                     preConfiguredIds = new Set(
                         providers.filter(p => p.pre_configured).map(p => p.id)
+                    );
+                    reviewPreConfiguredIds = new Set(
+                        reviewProviders.filter(p => p.pre_configured).map(p => p.id)
                     );
                     providerSelect.innerHTML = '<option value="">请选择AI服务商</option>';
                     providers.forEach(p => {
@@ -241,6 +313,15 @@
                         providerSelect.value = saved;
                         onProviderChange();
                     }
+
+                    // 填充复核模型供应商下拉
+                    reviewProviderSelect.innerHTML = '<option value="">使用主模型（不单独配置）</option>';
+                    reviewProviders.forEach(p => {
+                        const opt = document.createElement('option');
+                        opt.value = p.id;
+                        opt.textContent = p.name + ' (' + p.model + ')';
+                        reviewProviderSelect.appendChild(opt);
+                    });
                 }
             } catch (e) {
                 providerSelect.innerHTML = '<option value="">加载失败，请刷新页面</option>';
@@ -290,6 +371,41 @@
 
         providerSelect.addEventListener('change', onProviderChange);
 
+        // ====== 复核模型供应商切换 ======
+        function onReviewProviderChange() {
+            const pid = reviewProviderSelect.value;
+            if (pid && reviewProviders.some(p => p.id === pid)) {
+                reviewApiKeyGroup.style.display = 'block';
+                const info = PROVIDER_INFO[pid];
+                if (info) reviewModelInput.placeholder = info.model + '（留空使用默认）';
+            } else {
+                reviewApiKeyGroup.style.display = 'none';
+                reviewApiKeyInput.value = '';
+                reviewModelInput.placeholder = '留空使用服务商默认模型';
+            }
+            reviewSelectedProvider = pid || null;
+        }
+        reviewProviderSelect.addEventListener('change', onReviewProviderChange);
+
+        // ====== 复核配置展开/收起 ======
+        let reviewConfigExpanded = false;
+        reviewToggle.addEventListener('click', () => {
+            reviewConfigExpanded = !reviewConfigExpanded;
+            reviewConfigBody.style.display = reviewConfigExpanded ? 'block' : 'none';
+            const icon = reviewToggleIcon.querySelector('i');
+            if (icon) icon.className = 'fas fa-chevron-' + (reviewConfigExpanded ? 'down' : 'right');
+        });
+
+        // ====== 切换复核API Key可见性 ======
+        let reviewIsVisible = false;
+        reviewToggleVisBtn.addEventListener('click', () => {
+            reviewIsVisible = !reviewIsVisible;
+            reviewApiKeyInput.type = reviewIsVisible ? 'text' : 'password';
+            reviewToggleVisBtn.innerHTML = reviewIsVisible
+                ? '<i class="fas fa-eye-slash"></i>'
+                : '<i class="fas fa-eye"></i>';
+        });
+
         // ====== 切换API Key可见性 ======
         toggleVisibilityBtn.addEventListener('click', () => {
             isVisible = !isVisible;
@@ -309,6 +425,11 @@
             if (!preConfiguredIds.has(providerSelect.value)) {
                 payload.api_key = apiKeyInput.value.trim();
             }
+            // 复核模型配置
+            payload.review_provider = reviewProviderSelect.value || '';
+            payload.review_api_key = reviewApiKeyInput.value.trim() || '';
+            payload.review_model = reviewModelInput.value.trim() || '';
+            payload.review_api_url = reviewApiUrlInput.value.trim() || '';
             return payload;
         }
 
@@ -407,11 +528,7 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    if (result.has_balance_data) {
-                        window.location.href = '/integrity-test';
-                    } else {
-                        window.location.href = '/query';
-                    }
+                    window.location.href = '/field-mapper';
                 } else {
                     alert('保存失败: ' + result.error);
                 }
@@ -642,6 +759,52 @@
             color: #047857;
             font-size: 13px;
             margin: 4px 0 0 0;
+        }
+
+        /* 复核模型配置 */
+        .review-config-section {
+            margin-bottom: 32px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .review-config-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            background: #f9fafb;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.15s;
+        }
+        .review-config-header:hover {
+            background: #f3f4f6;
+        }
+        .review-config-header h4 {
+            margin: 0;
+            font-size: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #333;
+        }
+        .review-badge {
+            font-size: 11px;
+            background: #e0e7ff;
+            color: #3730a3;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: normal;
+        }
+        .review-toggle-icon {
+            color: #9ca3af;
+            font-size: 14px;
+            transition: transform 0.2s;
+        }
+        .review-config-body {
+            padding: 20px;
+            border-top: 1px solid #e5e7eb;
         }
     </style>
 </body>
