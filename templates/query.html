@@ -1,0 +1,1963 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能查询 - DA数据清洗业务AI应用</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/dracula.min.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <a href="{{ url_for('api_config_page') }}" class="back-link">
+                    <i class="fas fa-arrow-left"></i>
+                </a>
+                <i class="fas fa-search"></i>
+                <h1>智能查询</h1>
+            </div>
+            <div class="steps">
+                <div class="step completed">
+                    <span class="step-number">1</span>
+                    <span class="step-text">上传文件</span>
+                </div>
+                <div class="step completed">
+                    <span class="step-number">2</span>
+                    <span class="step-text">字段映射</span>
+                </div>
+                <div class="step completed">
+                    <span class="step-number">3</span>
+                    <span class="step-text">API配置</span>
+                </div>
+                <div class="step completed">
+                    <span class="step-number">4</span>
+                    <span class="step-text">完整性测试</span>
+                </div>
+                <div class="step active">
+                    <span class="step-number">5</span>
+                    <span class="step-text">查询分析</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- 传递数据信息到JavaScript -->
+        <script>
+            window.dataInfo = {{ data_info|tojson|safe }};
+            console.log('dataInfo keys:', Object.keys(window.dataInfo));
+            console.log('has mapped_fields:', 'mapped_fields' in window.dataInfo);
+            console.log('has mapped_preview:', 'mapped_preview' in window.dataInfo);
+            if (window.dataInfo.mapped_fields) {
+                console.log('mapped_fields names:', window.dataInfo.mapped_fields.map(f => f.name));
+            }
+            if (window.dataInfo.fields) {
+                console.log('fields names:', window.dataInfo.fields.map(f => f.name));
+            }
+        </script>
+
+        <main class="main-content">
+            <div class="query-container">
+                <div class="query-sidebar">
+                    <div class="data-info-card">
+                        <h4><i class="fas fa-database"></i> 数据概览</h4>
+                        <div class="data-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">文件名称</span>
+                                <span class="stat-value" id="file-name">-</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">数据行数</span>
+                                <span class="stat-value" id="row-count">-</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">字段数量</span>
+                                <span class="stat-value" id="field-count">-</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">API状态</span>
+                                <span class="stat-value status-active" id="api-status">已配置</span>
+                            </div>
+                        </div>
+
+                        <!-- 字段列表 -->
+                        <div class="field-list-container" style="margin-top: 20px;">
+                            <h5 style="margin-bottom: 10px; color: #555; font-size: 14px;">
+                                <i class="fas fa-list"></i> 字段列表
+                            </h5>
+                            <div class="field-list" id="field-list" style="max-height: 200px; overflow-y: auto;">
+                                <!-- 字段将通过JavaScript动态加载 -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="examples-card">
+                        <h4><i class="fas fa-lightbulb"></i> 查询示例</h4>
+                        <div class="examples-list">
+                            <button class="example-btn" data-query="筛选管理费用2024年全年借方大于50万的交易">
+                                <i class="fas fa-filter"></i>
+                                <span>按科目和金额筛选</span>
+                            </button>
+                            <button class="example-btn" data-query="按科目汇总发生额并计算占比，按金额降序排列">
+                                <i class="fas fa-calculator"></i>
+                                <span>按科目汇总</span>
+                            </button>
+                            <button class="example-btn" data-query="找出全年单笔金额超过10万元且摘要中包含'服务费'的凭证">
+                                <i class="fas fa-search-dollar"></i>
+                                <span>大额抽凭</span>
+                            </button>
+                            <button class="example-btn" data-query="按部门汇总2024年全年的费用发生额">
+                                <i class="fas fa-chart-bar"></i>
+                                <span>按部门汇总</span>
+                            </button>
+                            <button class="example-btn" data-query="统计本月各部门的预算执行情况">
+                                <i class="fas fa-chart-line"></i>
+                                <span>预算执行分析</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="quick-actions">
+                        <h4><i class="fas fa-bolt"></i> 快捷操作</h4>
+                        <button class="btn btn-small btn-block" id="clear-query-btn">
+                            <i class="fas fa-eraser"></i> 清空查询
+                        </button>
+                        <button class="btn btn-small btn-block" id="explain-code-btn">
+                            <i class="fas fa-question-circle"></i> 解释代码
+                        </button>
+                        <button class="btn btn-small btn-block" id="manage-rules-btn">
+                            <i class="fas fa-filter"></i> 筛选规则管理
+                        </button>
+                        <button class="btn btn-small btn-block" onclick="window.location.href='{{ url_for('api_config_page') }}'">
+                            <i class="fas fa-cog"></i> 重新配置API
+                        </button>
+                    </div>
+
+                    <div class="history-card">
+                        <h4>
+                            <i class="fas fa-history"></i> 查询历史
+                            <span class="history-count" id="history-count"></span>
+                        </h4>
+                        <div class="history-list" id="history-list">
+                            <div class="history-empty">暂无查询记录</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="query-main">
+                    <div class="rule-packs-card">
+                        <div class="rule-packs-header">
+                            <h3><i class="fas fa-filter"></i> 筛选规则</h3>
+                            <button class="btn btn-small" id="packs-manage-btn"><i class="fas fa-cog"></i> 管理</button>
+                        </div>
+                        <div id="inline-rules-list">
+                            <div class="rule-packs-loading">加载中...</div>
+                        </div>
+                    </div>
+
+                    <div class="query-input-card">
+                        <h3><i class="fas fa-comment-dots"></i> 自然语言查询</h3>
+                        <p class="query-description">
+                            用中文说出分析需求，AI 自动生成 SQL 查询并在本地 DuckDB 引擎中执行，结果即时展示。
+                        </p>
+
+                        <div class="query-input-area">
+                            <textarea id="query-input" placeholder="例如：筛选管理费用2024年全年借方大于50万的交易，按科目汇总并计算占比..." rows="4"></textarea>
+                            <div class="query-actions">
+                                <button class="btn btn-secondary" id="format-query-btn">
+                                    <i class="fas fa-magic"></i> 优化表达
+                                </button>
+                                <button class="btn btn-primary" id="generate-code-btn">
+                                    <i class="fas fa-code"></i> 生成代码
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="query-tips">
+                            <p><strong>查询技巧：</strong></p>
+                            <ul>
+                                <li>尽量具体：包含时间范围、科目、金额条件等</li>
+                                <li>明确目标：说明需要筛选、汇总、排序还是分组</li>
+                                <li>使用关键词：金额、日期、科目、部门、摘要等</li>
+                                <li>复杂需求可以分步描述，AI 会逐步生成对应代码</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="code-editor-card">
+                        <div class="code-header" id="code-editor-toggle" style="cursor:pointer;">
+                            <h3>
+                                <i class="fas fa-file-code"></i> 生成代码
+                                <span class="editor-toggle-icon" id="editor-toggle-icon">
+                                    <i class="fas fa-chevron-right"></i>
+                                </span>
+                            </h3>
+                            <div class="code-actions" onclick="event.stopPropagation();">
+                                <button class="btn btn-small" id="copy-code-btn">
+                                    <i class="fas fa-copy"></i> 复制代码
+                                </button>
+                                <button class="btn btn-small" id="format-code-btn">
+                                    <i class="fas fa-indent"></i> 格式化
+                                </button>
+                                <button class="btn btn-small btn-success" id="execute-code-btn">
+                                    <i class="fas fa-play"></i> 执行代码
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="code-editor-body" id="code-editor-body" style="display: none;">
+                            <div class="code-editor-container">
+                                <textarea id="code-editor"></textarea>
+                            </div>
+
+                            <div class="code-explanation" id="code-explanation" style="display: none;">
+                                <h4><i class="fas fa-info-circle"></i> 代码说明</h4>
+                                <div class="explanation-content" id="explanation-content"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="result-preview-card" style="display: none;" id="result-preview">
+                        <div class="result-header">
+                            <h3><i class="fas fa-table"></i> 执行结果</h3>
+                            <div class="result-actions">
+                                <button class="btn btn-small" id="export-csv-btn">
+                                    <i class="fas fa-file-csv"></i> 导出CSV
+                                </button>
+                                <button class="btn btn-small" id="export-excel-btn">
+                                    <i class="fas fa-file-excel"></i> 导出Excel
+                                </button>
+                                <button class="btn btn-small" id="view-details-btn">
+                                    <i class="fas fa-chart-bar"></i> 查看详情
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="result-summary" id="result-summary">
+                            <!-- 结果摘要将通过JavaScript动态生成 -->
+                        </div>
+
+                        <div class="result-table-container">
+                            <div class="table-wrapper">
+                                <table class="result-table" id="result-table">
+                                    <!-- 表格内容将通过JavaScript动态生成 -->
+                                </table>
+                            </div>
+                            <div class="table-info">
+                                <span id="table-info">共 0 行数据</span>
+                                <div class="pagination" id="pagination">
+                                    <!-- 分页控件 -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 筛选规则管理弹窗 -->
+            <div class="modal-overlay" id="rule-modal" style="display: none;">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3><i class="fas fa-filter"></i> 筛选规则管理</h3>
+                        <button class="modal-close" id="rule-modal-close">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="rule-section">
+                            <h4>全部规则</h4>
+                            <p class="rule-hint">点击"应用"将规则的 SQL 填入编辑器</p>
+                            <div id="rules-list"></div>
+                        </div>
+                        <div class="rule-section">
+                            <h4>新建自定义规则</h4>
+                            <div class="rule-form">
+                                <div class="form-group">
+                                    <label>规则名称</label>
+                                    <input type="text" id="rule-name" placeholder="例如：大额交易检测">
+                                </div>
+                                <div class="form-group">
+                                    <label>描述</label>
+                                    <input type="text" id="rule-desc" placeholder="规则用途说明">
+                                </div>
+                                <div class="form-group">
+                                    <label>类别</label>
+                                    <input type="text" id="rule-category" placeholder="例如：异常交易" value="自定义">
+                                </div>
+                                <div class="form-group">
+                                    <label>SQL 模板</label>
+                                    <textarea id="rule-sql" rows="3" placeholder="SELECT * FROM &quot;data&quot; WHERE ... 用 {param_name} 占位"></textarea>
+                                </div>
+                                <button type="button" class="btn btn-primary" id="save-rule-btn">保存规则</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="loading-overlay" id="loading-overlay" style="display: none;">
+                <div class="loading-content">
+                    <div class="spinner"></div>
+                    <h3 id="loading-title">正在处理...</h3>
+                    <p id="loading-message">请稍候</p>
+                </div>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <p>© 2026 DA数据清洗业务AI应用 - 审计数据智能查询与分析工具 V1.0</p>
+            <p class="disclaimer">提示：AI 生成的 SQL 查询在本地 DuckDB 引擎中执行，仅允许 SELECT 只读查询，数据始终在本地。</p>
+        </footer>
+    </div>
+
+    <!-- CodeMirror 库 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/sql/sql.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/edit/matchbrackets.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/edit/closebrackets.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/selection/active-line.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/fold/foldcode.min.js"></script>
+
+    <script>
+        // 全局变量
+        let codeMirrorEditor = null;
+        let currentResultData = null;
+        let currentPage = 1;
+        const pageSize = 10;
+
+        // 切换代码编辑器展开/收起
+        function toggleEditor(expand) {
+            const body = document.getElementById('code-editor-body');
+            const icon = document.querySelector('#editor-toggle-icon i');
+            if (!body || !icon) return;
+
+            const isHidden = body.style.display === 'none' || body.style.display === '';
+
+            if (expand === true || (expand === undefined && isHidden)) {
+                body.style.display = 'block';
+                icon.className = 'fas fa-chevron-down';
+                setTimeout(() => {
+                    if (codeMirrorEditor) codeMirrorEditor.refresh();
+                }, 100);
+            } else if (expand === false || (expand === undefined && !isHidden)) {
+                body.style.display = 'none';
+                icon.className = 'fas fa-chevron-right';
+            }
+        }
+
+        // 初始化CodeMirror编辑器
+        function initCodeEditor() {
+            const textarea = document.getElementById('code-editor');
+            codeMirrorEditor = CodeMirror.fromTextArea(textarea, {
+                mode: 'text/x-sql',
+                theme: 'dracula',
+                lineNumbers: true,
+                indentUnit: 4,
+                tabSize: 4,
+                matchBrackets: true,
+                autoCloseBrackets: true,
+                styleActiveLine: true,
+                lineWrapping: true,
+                foldGutter: true,
+                gutters: ['CodeMirror-linenumbers', 'CodeMirror-foldgutter']
+            });
+
+            // codeMirrorEditor.setSize('100%', '300px');
+        }
+
+        // 加载数据信息
+        async function loadDataInfo() {
+            try {
+                // 使用从服务器传递的数据信息
+                if (window.dataInfo && window.dataInfo.success) {
+                    document.getElementById('file-name').textContent = window.dataInfo.filename || '未知文件';
+                    document.getElementById('row-count').textContent = window.dataInfo.row_count ?
+                        window.dataInfo.row_count.toLocaleString() :
+                        (window.dataInfo.preview ? window.dataInfo.preview.length + '+' : '未知');
+                    document.getElementById('field-count').textContent = window.dataInfo.column_count ?
+                        window.dataInfo.column_count :
+                        (window.dataInfo.fields ? window.dataInfo.fields.length : '未知');
+
+                    // 显示字段列表（优先使用映射后的字段名）
+                    const fieldList = document.getElementById('field-list');
+                    const displayFields = window.dataInfo.mapped_fields || window.dataInfo.fields;
+                    if (fieldList && displayFields) {
+                        fieldList.innerHTML = '';
+                        displayFields.forEach(field => {
+                            const fieldItem = document.createElement('div');
+                            fieldItem.className = 'field-item';
+                            const displayName = field.original_name ?
+                                `${field.name} <span style="color:#999;font-size:11px;">(${field.original_name})</span>` :
+                                field.name;
+                            fieldItem.innerHTML = `
+                                <span class="field-name">${displayName}</span>
+                                <span class="field-type">${field.type}</span>
+                            `;
+                            fieldList.appendChild(fieldItem);
+                        });
+                    }
+                } else {
+                    // 如果没有数据信息，使用模拟数据
+                    document.getElementById('file-name').textContent = '财务数据.xlsx';
+                    document.getElementById('row-count').textContent = '1,234';
+                    document.getElementById('field-count').textContent = '8';
+                }
+            } catch (error) {
+                console.error('加载数据信息失败:', error);
+                // 出错时使用模拟数据
+                document.getElementById('file-name').textContent = '财务数据.xlsx';
+                document.getElementById('row-count').textContent = '1,234';
+                document.getElementById('field-count').textContent = '8';
+            }
+        }
+
+        // 优化查询
+        async function optimizeQuery() {
+            const query = document.getElementById('query-input').value.trim();
+
+            if (!query) {
+                alert('请输入查询语句');
+                return;
+            }
+
+            showLoading('正在优化查询...', 'AI正在优化您的查询语句');
+
+            try {
+                const response = await fetch('/api/optimize-query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ query })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    document.getElementById('query-input').value = result.optimized_query;
+                    showSuccess('查询优化成功！');
+                } else {
+                    throw new Error(result.error || '查询优化失败');
+                }
+            } catch (error) {
+                showError('优化查询失败: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 生成代码
+        async function generateCode() {
+            const query = document.getElementById('query-input').value.trim();
+
+            if (!query) {
+                alert('请输入查询语句');
+                return;
+            }
+
+            showLoading('正在生成代码...', 'AI正在分析您的需求并生成SQL查询');
+
+            try {
+                const response = await fetch('/api/generate-code', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ query })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    codeMirrorEditor.setValue(result.code);
+                    toggleEditor(true);
+                    document.getElementById('code-explanation').style.display = 'none';
+                    showSuccess('代码生成成功！');
+                    loadQueryHistory();
+                } else {
+                    throw new Error(result.error || '代码生成失败');
+                }
+            } catch (error) {
+                showError('生成代码失败: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 解释代码
+        async function explainCode() {
+            const code = codeMirrorEditor.getValue();
+
+            if (!code.trim()) {
+                alert('请先生成或输入代码');
+                return;
+            }
+
+            showLoading('正在解释代码...', 'AI正在分析代码功能');
+
+            try {
+                const response = await fetch('/api/explain-code', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ code })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    document.getElementById('explanation-content').innerHTML = renderMarkdown(result.explanation);
+                    document.getElementById('code-explanation').style.display = 'block';
+                    showSuccess('代码解释完成！');
+                } else {
+                    throw new Error(result.error || '代码解释失败');
+                }
+            } catch (error) {
+                showError('解释代码失败: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 执行代码
+        async function executeCode() {
+            const code = codeMirrorEditor.getValue();
+
+            if (!code.trim()) {
+                alert('请输入要执行的代码');
+                return;
+            }
+
+            showLoading('正在执行代码...', '代码在安全沙箱中执行，请稍候');
+
+            try {
+                const response = await fetch('/api/execute', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ code })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    currentResultData = result.result;
+                    displayResult(result.result);
+                    showSuccess('代码执行成功！');
+                } else {
+                    throw new Error(result.error || '代码执行失败');
+                }
+            } catch (error) {
+                showError('执行代码失败: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 显示结果
+        function displayResult(result) {
+            const resultPreview = document.getElementById('result-preview');
+            const resultSummary = document.getElementById('result-summary');
+            const resultTable = document.getElementById('result-table');
+
+            // 显示结果区域
+            resultPreview.style.display = 'block';
+
+            // 显示摘要
+            if (result.summary) {
+                resultSummary.innerHTML = `
+                    <div class="summary-item">
+                        <i class="fas fa-list"></i>
+                        <div>
+                            <span class="summary-label">记录数量</span>
+                            <span class="summary-value">${result.summary.record_count || 0}</span>
+                        </div>
+                    </div>
+                    <div class="summary-item">
+                        <i class="fas fa-calculator"></i>
+                        <div>
+                            <span class="summary-label">总金额</span>
+                            <span class="summary-value">${formatCurrency(result.summary.total_amount || 0)}</span>
+                        </div>
+                    </div>
+                    <div class="summary-item">
+                        <i class="fas fa-info-circle"></i>
+                        <div>
+                            <span class="summary-label">说明</span>
+                            <span class="summary-text">${result.summary.message || '执行完成'}</span>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // 显示表格
+            if (result.data && result.data.length > 0) {
+                // 生成表头
+                const headers = Object.keys(result.data[0]);
+                let thead = '<thead><tr>';
+                headers.forEach(header => {
+                    thead += `<th>${header}</th>`;
+                });
+                thead += '</tr></thead>';
+
+                // 生成数据行
+                let tbody = '<tbody>';
+                const startIndex = (currentPage - 1) * pageSize;
+                const endIndex = Math.min(startIndex + pageSize, result.data.length);
+
+                for (let i = startIndex; i < endIndex; i++) {
+                    const row = result.data[i];
+                    tbody += '<tr>';
+                    headers.forEach(header => {
+                        const value = row[header];
+                        tbody += `<td>${formatCellValue(value)}</td>`;
+                    });
+                    tbody += '</tr>';
+                }
+                tbody += '</tbody>';
+
+                resultTable.innerHTML = thead + tbody;
+
+                // 更新分页信息
+                updatePagination(result.data.length);
+            } else {
+                resultTable.innerHTML = '<tbody><tr><td colspan="10" style="text-align: center; padding: 40px;">没有数据</td></tr></tbody>';
+                document.getElementById('table-info').textContent = '共 0 行数据';
+                document.getElementById('pagination').innerHTML = '';
+            }
+
+            // 滚动到结果区域
+            resultPreview.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // 格式化单元格值
+        function formatCellValue(value) {
+            if (value === null || value === undefined) {
+                return '';
+            }
+
+            if (typeof value === 'number') {
+                // 如果是金额，格式化为货币
+                if (Math.abs(value) >= 1000) {
+                    return formatCurrency(value);
+                }
+                return value.toFixed(2);
+            }
+
+            if (typeof value === 'string') {
+                // 如果是日期字符串，尝试格式化
+                if (value.match(/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/) ||
+                    value.match(/^\d{1,2}[-/.]\d{1,2}[-/.]\d{4}/) ||
+                    value.match(/^\d{4}年\d{1,2}月\d{1,2}日$/)) {
+                    return value;
+                }
+                return value;
+            }
+
+            return String(value);
+        }
+
+        // 格式化货币
+        function formatCurrency(amount) {
+            return '¥' + amount.toFixed(2).replace(/\d(?=(\d{3})+\.)/g, '$&,');
+        }
+
+        // 简单 Markdown 转 HTML
+        function renderMarkdown(text) {
+            if (!text) return '';
+            let html = text
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/`(.+?)`/g, '<code>$1</code>');
+
+            // 按行处理列表
+            const lines = html.split('\n');
+            let result = '';
+            let inUl = false;
+            let inOl = false;
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const ulMatch = line.match(/^[-*]\s+(.+)/);
+                const olMatch = line.match(/^\d+[.)]\s+(.+)/);
+
+                if (ulMatch) {
+                    if (inOl) { result += '</ol>\n'; inOl = false; }
+                    if (!inUl) { result += '<ul>\n'; inUl = true; }
+                    result += '<li>' + ulMatch[1] + '</li>\n';
+                } else if (olMatch) {
+                    if (inUl) { result += '</ul>\n'; inUl = false; }
+                    if (!inOl) { result += '<ol>\n'; inOl = true; }
+                    result += '<li>' + olMatch[1] + '</li>\n';
+                } else {
+                    if (inUl) { result += '</ul>\n'; inUl = false; }
+                    if (inOl) { result += '</ol>\n'; inOl = false; }
+                    if (line.trim() === '') {
+                        result += '<br>\n';
+                    } else {
+                        result += '<p>' + line + '</p>\n';
+                    }
+                }
+            }
+            if (inUl) result += '</ul>\n';
+            if (inOl) result += '</ol>\n';
+
+            return result;
+        }
+
+        // 更新分页
+        function updatePagination(totalRows) {
+            const totalPages = Math.ceil(totalRows / pageSize);
+            const pagination = document.getElementById('pagination');
+            const tableInfo = document.getElementById('table-info');
+
+            tableInfo.textContent = `共 ${totalRows} 行数据，第 ${currentPage} / ${totalPages} 页`;
+
+            if (totalPages <= 1) {
+                pagination.innerHTML = '';
+                return;
+            }
+
+            let html = '';
+            if (currentPage > 1) {
+                html += `<button class="page-btn" onclick="changePage(${currentPage - 1})"><i class="fas fa-chevron-left"></i></button>`;
+            }
+
+            for (let i = 1; i <= totalPages; i++) {
+                if (i === currentPage) {
+                    html += `<span class="page-current">${i}</span>`;
+                } else if (i === 1 || i === totalPages || Math.abs(i - currentPage) <= 2) {
+                    html += `<button class="page-btn" onclick="changePage(${i})">${i}</button>`;
+                } else if (Math.abs(i - currentPage) === 3) {
+                    html += '<span class="page-ellipsis">...</span>';
+                }
+            }
+
+            if (currentPage < totalPages) {
+                html += `<button class="page-btn" onclick="changePage(${currentPage + 1})"><i class="fas fa-chevron-right"></i></button>`;
+            }
+
+            pagination.innerHTML = html;
+        }
+
+        // 切换页面
+        function changePage(page) {
+            currentPage = page;
+            if (currentResultData && currentResultData.data) {
+                displayResult(currentResultData);
+            }
+        }
+
+        // 导出数据
+        async function exportData(format) {
+            if (!currentResultData) {
+                alert('请先执行代码生成结果');
+                return;
+            }
+
+            showLoading(`正在导出${format.toUpperCase()}...`, '请稍候');
+
+            try {
+                const response = await fetch('/api/export', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ format })
+                });
+
+                if (response.ok) {
+                    // 创建下载链接
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `财务查询结果.${format}`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+
+                    showSuccess(`导出${format.toUpperCase()}成功！`);
+                } else {
+                    throw new Error('导出失败');
+                }
+            } catch (error) {
+                showError('导出失败: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // ===== 查询历史 =====
+        async function loadQueryHistory() {
+            try {
+                const res = await fetch('/api/query-history');
+                const data = await res.json();
+                if (!data.success) return;
+                const list = document.getElementById('history-list');
+                const count = document.getElementById('history-count');
+                if (!list) return;
+                if (data.history.length === 0) {
+                    list.innerHTML = '<div class="history-empty">暂无查询记录</div>';
+                    if (count) count.textContent = '';
+                    return;
+                }
+                if (count) count.textContent = data.history.length;
+                list.innerHTML = data.history.reverse().map((item, idx) => `
+                    <div class="history-item" data-query="${item.query.replace(/"/g, '&quot;')}">
+                        <div class="history-query">${escapeHtml(item.query)}</div>
+                        <div class="history-meta">
+                            <span class="history-time">${item.timestamp}</span>
+                            <span class="history-status history-${item.success ? 'success' : 'error'}">${item.success ? '成功' : '失败'}</span>
+                        </div>
+                    </div>
+                `).join('');
+                list.querySelectorAll('.history-item').forEach(el => {
+                    el.addEventListener('click', function() {
+                        const q = this.dataset.query;
+                        document.getElementById('query-input').value = q;
+                        document.getElementById('query-input').scrollIntoView({ behavior: 'smooth' });
+                    });
+                });
+            } catch (e) {
+                console.error('加载查询历史失败:', e);
+            }
+        }
+
+        function escapeHtml(text) {
+            const d = document.createElement('div');
+            d.textContent = text;
+            return d.innerHTML;
+        }
+
+        // ===== 筛选规则（页面内联展示） =====
+        async function loadInlineRules() {
+            try {
+                const res = await fetch('/api/preset-rules/packs');
+                const data = await res.json();
+                if (!data.success) return;
+                renderInlineRules(data.packs);
+            } catch (e) {
+                document.getElementById('inline-rules-list').innerHTML = '<div class="history-empty">加载失败</div>';
+            }
+        }
+
+        function renderInlineRules(packs) {
+            const container = document.getElementById('inline-rules-list');
+            if (!container) return;
+            if (!packs || packs.length === 0) {
+                container.innerHTML = '<div class="history-empty">暂无规则</div>';
+                return;
+            }
+            container.innerHTML = packs.map(pack => `
+                <div class="rule-pack">
+                    <div class="rule-pack-header" onclick="toggleInlinePack(this)">
+                        <div class="rule-pack-info">
+                            <strong>${escapeHtml(pack.name)}</strong>
+                            <span class="rule-pack-source">${escapeHtml(pack.source || '')}</span>
+                        </div>
+                        <div class="rule-pack-meta">
+                            <span class="rule-count">${(pack.rules || []).length} 条</span>
+                            <i class="fas fa-chevron-down rule-pack-arrow"></i>
+                        </div>
+                    </div>
+                    <div class="rule-pack-body" style="display:none">
+                        ${pack.description ? `<p class="rule-pack-desc">${escapeHtml(pack.description)}</p>` : ''}
+                        ${(pack.rules || []).map(r => `
+                            <div class="rule-item">
+                                <div class="rule-info">
+                                    <strong>${escapeHtml(r.name)}</strong>
+                                    <p>${escapeHtml(r.description || '')}</p>
+                                    <span class="rule-category">${escapeHtml(r.category || '')}</span>
+                                </div>
+                                <div class="rule-actions">
+                                    <button class="btn btn-small rule-apply-btn" data-rule-id="${r.id}">应用</button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+
+            container.querySelectorAll('.rule-apply-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const ruleId = this.dataset.ruleId;
+                    const allRules = [];
+                    packs.forEach(p => (p.rules || []).forEach(r => allRules.push(r)));
+                    const rule = allRules.find(r => r.id === ruleId);
+                    if (rule) {
+                        document.getElementById('query-input').value = rule.description || rule.name;
+                        document.getElementById('query-input').scrollIntoView({ behavior: 'smooth' });
+                    }
+                });
+            });
+        }
+
+        function toggleInlinePack(headerEl) {
+            const body = headerEl.nextElementSibling;
+            const arrow = headerEl.querySelector('.rule-pack-arrow');
+            if (!body) return;
+            const isHidden = body.style.display === 'none' || !body.style.display;
+            body.style.display = isHidden ? 'block' : 'none';
+            if (arrow) arrow.className = 'fas fa-chevron-' + (isHidden ? 'down' : 'right');
+        }
+
+        // ===== 筛选规则管理（弹窗） =====
+        let currentRules = [];
+
+        async function loadRules() {
+            try {
+                const res = await fetch('/api/preset-rules/packs');
+                const data = await res.json();
+                if (!data.success) return;
+                renderRulePacks(data.packs, data.custom_rules);
+                // 也维护扁平列表供查找
+                currentRules = [];
+                data.packs.forEach(p => (p.rules || []).forEach(r => { r._pack_id = p.id; currentRules.push(r); }));
+                data.custom_rules.forEach(r => { r.is_custom = true; currentRules.push(r); });
+            } catch (e) {
+                console.error('加载规则失败:', e);
+            }
+        }
+
+        function renderRulePacks(packs, customRules) {
+            const container = document.getElementById('rules-list');
+            if (!container) return;
+
+            let html = '';
+
+            // 内置规则包
+            packs.forEach(pack => {
+                const rules = pack.rules || [];
+                html += `
+                    <div class="rule-pack">
+                        <div class="rule-pack-header" onclick="toggleRulePack(this)">
+                            <div class="rule-pack-info">
+                                <strong>${escapeHtml(pack.name)}</strong>
+                                <span class="rule-pack-source">${escapeHtml(pack.source || '')}</span>
+                                <span class="rule-badge rule-builtin">内置</span>
+                            </div>
+                            <div class="rule-pack-meta">
+                                <span class="rule-count">${rules.length} 条规则</span>
+                                <i class="fas fa-chevron-down rule-pack-arrow"></i>
+                            </div>
+                        </div>
+                        <div class="rule-pack-body">
+                            ${pack.description ? `<p class="rule-pack-desc">${escapeHtml(pack.description)}</p>` : ''}
+                            ${rules.map(rule => renderRuleItem(rule, false)).join('')}
+                            ${rules.length === 0 ? '<div class="history-empty">暂无规则</div>' : ''}
+                        </div>
+                    </div>
+                `;
+            });
+
+            // 自定义规则
+            if (customRules && customRules.length > 0) {
+                html += `
+                    <div class="rule-pack">
+                        <div class="rule-pack-header" onclick="toggleRulePack(this)">
+                            <div class="rule-pack-info">
+                                <strong>自定义规则</strong>
+                                <span class="rule-badge rule-custom">自定义</span>
+                            </div>
+                            <div class="rule-pack-meta">
+                                <span class="rule-count">${customRules.length} 条规则</span>
+                                <i class="fas fa-chevron-down rule-pack-arrow"></i>
+                            </div>
+                        </div>
+                        <div class="rule-pack-body">
+                            ${customRules.map(rule => renderRuleItem(rule, true)).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html || '<div class="history-empty">暂无规则</div>';
+
+            // 事件绑定: 应用按钮（填入自然语言查询）
+            container.querySelectorAll('.rule-apply-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const ruleId = this.dataset.ruleId;
+                    const rule = currentRules.find(r => r.id === ruleId);
+                    if (rule) {
+                        document.getElementById('query-input').value = rule.description || rule.name;
+                    }
+                });
+            });
+
+            // 事件绑定: 删除按钮（自定义规则）
+            container.querySelectorAll('.rule-delete-btn').forEach(btn => {
+                btn.addEventListener('click', async function(e) {
+                    e.stopPropagation();
+                    if (!confirm('确定要删除这条自定义规则吗？')) return;
+                    const ruleId = this.dataset.ruleId;
+                    try {
+                        const res = await fetch(`/api/preset-rules/${ruleId}`, { method: 'DELETE' });
+                        const data = await res.json();
+                        if (data.success) {
+                            showSuccess('规则已删除');
+                            loadRules();
+                        } else {
+                            showError(data.error || '删除失败');
+                        }
+                    } catch (e) {
+                        showError('删除失败: ' + e.message);
+                    }
+                });
+            });
+        }
+
+        function renderRuleItem(rule, isCustom) {
+            return `
+                <div class="rule-item">
+                    <div class="rule-info">
+                        <strong>${escapeHtml(rule.name)}</strong>
+                        <p>${escapeHtml(rule.description || '')}</p>
+                        <span class="rule-category">${escapeHtml(rule.category || '未分类')}</span>
+                    </div>
+                    <div class="rule-actions">
+                        <button class="btn btn-small rule-apply-btn" data-rule-id="${rule.id}">应用</button>
+                        ${isCustom ? `<button class="btn btn-small btn-danger rule-delete-btn" data-rule-id="${rule.id}">删除</button>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        function toggleRulePack(headerEl) {
+            const body = headerEl.nextElementSibling;
+            const arrow = headerEl.querySelector('.rule-pack-arrow');
+            if (!body) return;
+            const isHidden = body.style.display === 'none';
+            body.style.display = isHidden ? 'block' : 'none';
+            if (arrow) arrow.className = 'fas fa-chevron-' + (isHidden ? 'down' : 'right');
+        }
+
+        // 显示/隐藏加载状态
+        function showLoading(title, message) {
+            document.getElementById('loading-title').textContent = title;
+            document.getElementById('loading-message').textContent = message;
+            document.getElementById('loading-overlay').style.display = 'flex';
+        }
+
+        function hideLoading() {
+            document.getElementById('loading-overlay').style.display = 'none';
+        }
+
+        // 显示成功消息
+        function showSuccess(message) {
+            if (window.app && window.app.showSuccess) {
+                window.app.showSuccess(message);
+            } else {
+                alert('成功: ' + message);
+            }
+        }
+
+        // 显示错误消息
+        function showError(message) {
+            if (window.app && window.app.showError) {
+                window.app.showError(message);
+            } else {
+                alert('错误: ' + message);
+            }
+        }
+
+        // 事件监听
+        document.addEventListener('DOMContentLoaded', () => {
+            // 初始化代码编辑器
+            initCodeEditor();
+
+            // 代码编辑器展开/收起
+            document.getElementById('code-editor-toggle').addEventListener('click', () => toggleEditor());
+
+            // 加载数据信息
+            loadDataInfo();
+
+            // 示例按钮点击
+            document.querySelectorAll('.example-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const query = btn.dataset.query;
+                    document.getElementById('query-input').value = query;
+                });
+            });
+
+            // 优化表达按钮
+            document.getElementById('format-query-btn').addEventListener('click', optimizeQuery);
+
+            // 生成代码按钮
+            document.getElementById('generate-code-btn').addEventListener('click', generateCode);
+
+            // 解释代码按钮
+            document.getElementById('explain-code-btn').addEventListener('click', explainCode);
+
+            // 执行代码按钮
+            document.getElementById('execute-code-btn').addEventListener('click', executeCode);
+
+            // 清空查询按钮
+            document.getElementById('clear-query-btn').addEventListener('click', () => {
+                document.getElementById('query-input').value = '';
+            });
+
+            // 复制代码按钮
+            document.getElementById('copy-code-btn').addEventListener('click', () => {
+                const code = codeMirrorEditor.getValue();
+                navigator.clipboard.writeText(code).then(() => {
+                    showSuccess('代码已复制到剪贴板');
+                });
+            });
+
+            // 导出按钮
+            document.getElementById('export-csv-btn').addEventListener('click', () => exportData('csv'));
+            document.getElementById('export-excel-btn').addEventListener('click', () => exportData('xlsx'));
+
+            // 加载查询历史
+            loadQueryHistory();
+
+            // 加载内联筛选规则
+            loadInlineRules();
+
+            // 筛选规则管理弹窗
+            const ruleModal = document.getElementById('rule-modal');
+            function openRuleModal() {
+                ruleModal.style.display = 'flex';
+                loadRules();
+            }
+            document.getElementById('manage-rules-btn').addEventListener('click', openRuleModal);
+            document.getElementById('packs-manage-btn').addEventListener('click', openRuleModal);
+            document.getElementById('rule-modal-close').addEventListener('click', function() {
+                ruleModal.style.display = 'none';
+            });
+            ruleModal.addEventListener('click', function(e) {
+                if (e.target === ruleModal) ruleModal.style.display = 'none';
+            });
+
+            // 保存自定义规则
+            document.getElementById('save-rule-btn').addEventListener('click', async function() {
+                const name = document.getElementById('rule-name').value.trim();
+                const desc = document.getElementById('rule-desc').value.trim();
+                const category = document.getElementById('rule-category').value.trim();
+                const sql = document.getElementById('rule-sql').value.trim();
+                if (!name || !sql) {
+                    showError('规则名称和 SQL 模板不能为空');
+                    return;
+                }
+                try {
+                    const res = await fetch('/api/preset-rules', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name, description: desc, category, sql_template: sql })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        showSuccess('规则已保存');
+                        document.getElementById('rule-name').value = '';
+                        document.getElementById('rule-desc').value = '';
+                        document.getElementById('rule-category').value = '自定义';
+                        document.getElementById('rule-sql').value = '';
+                        loadRules();
+                    } else {
+                        showError(data.error || '保存失败');
+                    }
+                } catch (e) {
+                    showError('保存失败: ' + e.message);
+                }
+            });
+        });
+    </script>
+
+    <style>
+        .query-container {
+            display: flex;
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        .query-sidebar {
+            flex: 0 0 280px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .query-main {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .data-info-card, .examples-card, .quick-actions {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .data-info-card h4, .examples-card h4, .quick-actions h4 {
+            margin-bottom: 16px;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .data-stats {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .stat-item:last-child {
+            border-bottom: none;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .stat-value {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .status-active {
+            color: #10b981;
+            background: rgba(16, 185, 129, 0.1);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .examples-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .example-btn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            cursor: pointer;
+            text-align: left;
+            transition: all 0.2s;
+        }
+
+        .example-btn:hover {
+            background: #f3f4f6;
+            border-color: #d1d5db;
+        }
+
+        .example-btn i {
+            color: #6b7280;
+        }
+
+        .example-btn span {
+            flex: 1;
+            color: #374151;
+            font-size: 14px;
+        }
+
+        .btn-block {
+            width: 100%;
+            margin-bottom: 8px;
+        }
+
+        .btn-success {
+            background: #10b981;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #0da271;
+        }
+
+        .query-input-card, .code-editor-card, .result-preview-card {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .result-preview-card {
+            overflow: hidden;
+        }
+
+        .query-description {
+            color: #666;
+            margin-bottom: 20px;
+        }
+
+        .query-input-area {
+            margin-bottom: 20px;
+        }
+
+        #query-input {
+            width: 100%;
+            padding: 16px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            resize: vertical;
+            min-height: 100px;
+            font-family: inherit;
+            line-height: 1.5;
+        }
+
+        #query-input:focus {
+            outline: none;
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .query-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .query-tips {
+            background: #f0f9ff;
+            border: 1px solid #bae6fd;
+            border-radius: 6px;
+            padding: 16px;
+            font-size: 14px;
+        }
+
+        .query-tips p {
+            margin-bottom: 8px;
+            color: #0369a1;
+            font-weight: 600;
+        }
+
+        .query-tips ul {
+            list-style: none;
+            padding-left: 20px;
+            margin: 0;
+        }
+
+        .query-tips li {
+            padding: 2px 0;
+            color: #475569;
+            position: relative;
+        }
+
+        .query-tips li:before {
+            content: "•";
+            color: #0ea5e9;
+            position: absolute;
+            left: -15px;
+        }
+
+        .code-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .code-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .code-editor-container {
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            overflow: hidden;
+            margin-bottom: 16px;
+        }
+
+        .CodeMirror {
+            height: auto;
+            min-height: 300px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+        }
+
+        .code-explanation {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 16px;
+            margin-top: 16px;
+        }
+
+        .code-explanation h4 {
+            margin-bottom: 12px;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .explanation-content {
+            color: #4b5563;
+            line-height: 1.8;
+        }
+        .explanation-content p {
+            margin: 8px 0;
+        }
+        .explanation-content ul, .explanation-content ol {
+            margin: 8px 0;
+            padding-left: 24px;
+        }
+        .explanation-content li {
+            margin: 4px 0;
+        }
+        .explanation-content code {
+            background: #e5e7eb;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 13px;
+            color: #d63384;
+        }
+        .explanation-content strong {
+            color: #2563eb;
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .result-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .result-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .summary-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            background: #f9fafb;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .summary-item i {
+            font-size: 24px;
+            color: #6b7280;
+        }
+
+        .summary-label {
+            display: block;
+            font-size: 12px;
+            color: #6b7280;
+            margin-bottom: 4px;
+        }
+
+        .summary-value {
+            display: block;
+            font-size: 20px;
+            font-weight: 600;
+            color: #111827;
+        }
+
+        .summary-text {
+            display: block;
+            font-size: 14px;
+            color: #374151;
+        }
+
+        .result-table-container {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            overflow: auto;
+        }
+
+        .table-wrapper {
+            overflow: auto;
+            max-height: 500px;
+            width: 100%;
+        }
+
+        .result-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+
+        .result-table th {
+            background: #f9fafb;
+            padding: 12px 16px;
+            text-align: left;
+            font-weight: 600;
+            color: #374151;
+            border-bottom: 1px solid #e5e7eb;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        .result-table td {
+            padding: 12px 16px;
+            border-bottom: 1px solid #e5e7eb;
+            color: #4b5563;
+        }
+
+        .result-table tr:hover {
+            background: #f3f4f6;
+        }
+
+        .table-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: #f9fafb;
+            border-top: 1px solid #e5e7eb;
+            font-size: 14px;
+            color: #6b7280;
+        }
+
+        .pagination {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .page-btn {
+            padding: 4px 8px;
+            border: 1px solid #d1d5db;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .page-btn:hover {
+            background: #f3f4f6;
+        }
+
+        .page-current {
+            padding: 4px 8px;
+            background: #2563eb;
+            color: white;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .page-ellipsis {
+            padding: 4px;
+            color: #6b7280;
+        }
+
+        .code-editor-body {
+            transition: all 0.3s ease;
+        }
+        .editor-toggle-icon {
+            transition: transform 0.3s ease;
+            margin-left: 8px;
+            font-size: 14px;
+            color: #6b7280;
+        }
+        .code-header h3 {
+            display: flex;
+            align-items: center;
+        }
+
+        /* 查询历史 */
+        .history-card {
+            background: white;
+            border-radius: 8px;
+            padding: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            margin-top: 12px;
+        }
+        .history-card h4 {
+            margin-bottom: 12px;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 15px;
+        }
+        .history-count {
+            font-size: 11px;
+            background: #e5e7eb;
+            color: #6b7280;
+            padding: 1px 8px;
+            border-radius: 10px;
+            font-weight: normal;
+        }
+        .history-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .history-empty {
+            color: #9ca3af;
+            font-size: 13px;
+            text-align: center;
+            padding: 16px 0;
+        }
+        .history-item {
+            padding: 10px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.15s;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        .history-item:last-child {
+            border-bottom: none;
+        }
+        .history-item:hover {
+            background: #f3f4f6;
+        }
+        .history-query {
+            font-size: 13px;
+            color: #374151;
+            margin-bottom: 4px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .history-meta {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+        }
+        .history-time {
+            color: #9ca3af;
+        }
+        .history-status {
+            padding: 1px 6px;
+            border-radius: 3px;
+        }
+        .history-success {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        .history-error {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        /* 内联规则包卡片 */
+        .rule-packs-card {
+            background: white;
+            border-radius: 8px;
+            padding: 16px 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            margin-bottom: 16px;
+        }
+        .rule-packs-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .rule-packs-header h3 {
+            margin: 0;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #333;
+        }
+        .rule-packs-loading {
+            color: #9ca3af;
+            font-size: 13px;
+            padding: 8px 0;
+        }
+        .rule-packs-card .rule-pack {
+            margin-bottom: 8px;
+        }
+        .rule-packs-card .rule-pack:last-child {
+            margin-bottom: 0;
+        }
+        .rule-packs-card .rule-pack-header {
+            padding: 10px 12px;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.15s;
+        }
+        .rule-packs-card .rule-pack-header:hover {
+            background: #f3f4f6;
+        }
+        .rule-packs-card .rule-pack-body {
+            padding: 8px 4px 4px;
+        }
+        .rule-packs-card .rule-pack-desc {
+            font-size: 12px;
+            color: #6b7280;
+            margin: 0 0 8px 0;
+            padding: 0 8px;
+            line-height: 1.5;
+        }
+        .rule-packs-card .rule-item {
+            padding: 8px 10px;
+            border: none;
+            border-radius: 4px;
+            margin-bottom: 4px;
+            background: #fafafa;
+        }
+        .rule-packs-card .rule-item:hover {
+            background: #f3f4f6;
+        }
+        .rule-packs-card .rule-info strong {
+            font-size: 13px;
+        }
+        .rule-packs-card .rule-info p {
+            font-size: 12px;
+            color: #6b7280;
+            margin: 1px 0;
+        }
+        .rule-packs-card .rule-actions {
+            flex-shrink: 0;
+            margin-left: 8px;
+        }
+
+        /* 规则管理弹窗 */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            width: 640px;
+            max-width: 90vw;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 18px 24px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .modal-header h3 {
+            margin: 0;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            color: #6b7280;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+        }
+        .modal-close:hover {
+            color: #111827;
+        }
+        .modal-body {
+            padding: 20px 24px;
+            overflow-y: auto;
+            flex: 1;
+        }
+        .rule-section {
+            margin-bottom: 24px;
+        }
+        .rule-section:last-child {
+            margin-bottom: 0;
+        }
+        .rule-section h4 {
+            font-size: 14px;
+            color: #374151;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .rule-hint {
+            font-size: 12px;
+            color: #9ca3af;
+            margin-bottom: 12px;
+        }
+        .rule-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            margin-bottom: 8px;
+        }
+        .rule-item:last-child {
+            margin-bottom: 0;
+        }
+        .rule-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .rule-info strong {
+            font-size: 13px;
+            color: #111827;
+        }
+        .rule-info p {
+            font-size: 12px;
+            color: #6b7280;
+            margin: 2px 0;
+        }
+        .rule-category {
+            font-size: 11px;
+            color: #9ca3af;
+        }
+        .rule-badge {
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 3px;
+            margin-left: 6px;
+            font-weight: normal;
+        }
+        .rule-builtin {
+            background: #e0e7ff;
+            color: #3730a3;
+        }
+        .rule-custom {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        .rule-actions {
+            display: flex;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+            border: none;
+        }
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+        .rule-form .form-group {
+            margin-bottom: 12px;
+        }
+        .rule-form label {
+            display: block;
+            font-size: 12px;
+            color: #6b7280;
+            margin-bottom: 4px;
+        }
+        .rule-form input, .rule-form textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 13px;
+            font-family: inherit;
+            box-sizing: border-box;
+        }
+        .rule-form input:focus, .rule-form textarea:focus {
+            outline: none;
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+        }
+        .rule-form textarea {
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        /* 规则包分组 */
+        .rule-pack {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+        .rule-pack-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 14px;
+            background: #f9fafb;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.15s;
+        }
+        .rule-pack-header:hover {
+            background: #f3f4f6;
+        }
+        .rule-pack-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .rule-pack-info strong {
+            font-size: 14px;
+            color: #111827;
+        }
+        .rule-pack-source {
+            font-size: 11px;
+            color: #6b7280;
+            background: #e5e7eb;
+            padding: 1px 6px;
+            border-radius: 3px;
+        }
+        .rule-pack-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #9ca3af;
+        }
+        .rule-pack-arrow {
+            font-size: 12px;
+            transition: transform 0.2s;
+        }
+        .rule-pack-body {
+            padding: 8px 14px 14px;
+        }
+        .rule-pack-desc {
+            font-size: 12px;
+            color: #6b7280;
+            margin: 0 0 10px 0;
+            line-height: 1.5;
+        }
+        .rule-count {
+            font-size: 11px;
+            color: #9ca3af;
+        }
+    </style>
+</body>
+</html>

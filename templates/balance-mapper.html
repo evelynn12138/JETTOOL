@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>科目余额表字段映射 - DA数据清洗业务AI应用</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <a href="{{ url_for('field_mapper_page') }}" class="back-link">
+                    <i class="fas fa-arrow-left"></i>
+                </a>
+                <i class="fas fa-balance-scale"></i>
+                <h1>字段映射 - 科目余额表</h1>
+            </div>
+            <div class="steps">
+                <div class="step completed">
+                    <span class="step-number">1</span>
+                    <span class="step-text">上传文件</span>
+                </div>
+                <div class="step active">
+                    <span class="step-number">2</span>
+                    <span class="step-text">字段映射</span>
+                </div>
+                <div class="step">
+                    <span class="step-number">3</span>
+                    <span class="step-text">API配置</span>
+                </div>
+                <div class="step">
+                    <span class="step-number">4</span>
+                    <span class="step-text">完整性测试</span>
+                </div>
+                <div class="step">
+                    <span class="step-number">5</span>
+                    <span class="step-text">查询分析</span>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <div class="mapper-card">
+                <div class="mapper-header">
+                    <h3><i class="fas fa-balance-scale"></i> 科目余额表字段映射</h3>
+                    <p class="mapper-description">
+                        将科目余额表的字段映射到标准字段，以便进行完整性交叉验证。关键字段包括公司名、科目编号、期初余额和期末余额。
+                    </p>
+                </div>
+
+                <div class="data-preview">
+                    <h4><i class="fas fa-table"></i> 数据预览 (前{{ data_info.preview|length }}行)</h4>
+                    <div class="preview-table-container">
+                        <table class="preview-table">
+                            <thead>
+                                <tr>
+                                    {% for field in data_info.fields %}
+                                    <th>{{ field.name }}</th>
+                                    {% endfor %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in data_info.preview %}
+                                <tr>
+                                    {% for field in data_info.fields %}
+                                    <td>{{ row[field.name] }}</td>
+                                    {% endfor %}
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="field-mapping">
+                    <h4><i class="fas fa-exchange-alt"></i> 科目余额表字段映射配置</h4>
+                    <p class="mapper-hint">
+                        请将您的科目余额表字段映射到系统标准字段。
+                        <br><strong>公司名、科目编号、科目名称、期初余额、期末余额</strong>为完成交叉验证的关键字段。
+                    </p>
+
+                    <div class="mapping-table-container">
+                        <table class="mapping-table">
+                            <thead>
+                                <tr>
+                                    <th>系统标准字段</th>
+                                    <th>字段说明</th>
+                                    <th>映射到您的字段</th>
+                                    <th>数据类型</th>
+                                    <th>样本值</th>
+                                </tr>
+                            </thead>
+                            <tbody id="mapping-body">
+                                <!-- 映射行通过JavaScript动态生成 -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="mapping-actions">
+                        <button class="btn btn-secondary" id="auto-map-btn">
+                            <i class="fas fa-magic"></i> 智能重新映射
+                        </button>
+                        <button class="btn btn-secondary" id="reset-btn">
+                            <i class="fas fa-redo"></i> 重置映射
+                        </button>
+                    </div>
+                </div>
+
+                <div class="action-buttons">
+                    <button class="btn btn-secondary" onclick="window.location.href='{{ url_for('field_mapper_page') }}'">
+                        <i class="fas fa-arrow-left"></i> 返回序时账映射
+                    </button>
+                    <button class="btn btn-primary" id="save-mapping-btn">
+                        <i class="fas fa-check"></i> 保存映射并继续
+                    </button>
+                </div>
+            </div>
+
+            <div class="loading-overlay" id="loading-overlay" style="display: none;">
+                <div class="loading-content">
+                    <div class="spinner"></div>
+                    <h3>正在保存字段映射...</h3>
+                    <p>请稍候，系统正在处理您的配置</p>
+                </div>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <p>© 2026 DA数据清洗业务AI应用 - 审计数据智能查询与分析工具 V1.0</p>
+            <p class="disclaimer">提示：字段映射决定了后续完整性测试的准确性，请仔细核对。</p>
+        </footer>
+    </div>
+
+    <script>
+        // 标准字段定义（科目余额表）
+        const standardFields = [
+            { id: 'company', name: '公司名', description: '公司名称', type: 'text', required: true },
+            { id: 'account_code', name: '科目编号', description: '会计科目编号', type: 'text', required: true },
+            { id: 'account_name', name: '科目名称', description: '会计科目名称', type: 'text', required: true },
+            { id: 'beginning_balance', name: '期初余额', description: '期初余额金额', type: 'number', required: true },
+            { id: 'ending_balance', name: '期末余额', description: '期末余额金额', type: 'number', required: true },
+            { id: 'beginning_debit', name: '期初借方', description: '期初借方金额', type: 'number', required: false },
+            { id: 'beginning_credit', name: '期初贷方', description: '期初贷方金额', type: 'number', required: false },
+            { id: 'ending_debit', name: '期末借方', description: '期末借方金额', type: 'number', required: false },
+            { id: 'ending_credit', name: '期末贷方', description: '期末贷方金额', type: 'number', required: false }
+        ];
+
+        // 用户字段数据
+        const userFields = {{ data_info.fields|tojson }};
+        const previewData = {{ data_info.preview|tojson }};
+
+        // 智能推荐映射
+        function recommendMapping() {
+            const mapping = {};
+            const keywordMap = {
+                '公司名': ['公司', '公司名', '公司名称', '企业', '单位', 'company', 'entity'],
+                '科目编号': ['科目编号', '科目代码', 'account code', 'account_code', '科目编码', '编码', 'code'],
+                '科目名称': ['科目名称', '科目', '会计科目', 'account', 'account_name', 'subject'],
+                '期初余额': ['期初余额', '期初', 'beginning', '期初金额', '年初余额', '期初数'],
+                '期末余额': ['期末余额', '期末', 'ending', '期末金额', '年末余额', '期末数'],
+                '期初借方': ['期初借方', '年初借方', 'beginning debit', '期初借'],
+                '期初贷方': ['期初贷方', '年初贷方', 'beginning credit', '期初贷'],
+                '期末借方': ['期末借方', '年末借方', 'ending debit', '期末借'],
+                '期末贷方': ['期末贷方', '年末贷方', 'ending credit', '期末贷']
+            };
+
+            standardFields.forEach(stdField => {
+                const keywords = keywordMap[stdField.name] || [];
+                let bestMatch = null;
+                let bestScore = 0;
+
+                userFields.forEach(userField => {
+                    const userName = userField.name.toLowerCase();
+                    let score = 0;
+
+                    keywords.forEach(keyword => {
+                        if (userName.includes(keyword.toLowerCase())) {
+                            score += 10;
+                        }
+                    });
+
+                    if (stdField.type === userField.type) {
+                        score += 5;
+                    }
+
+                    if (userName === stdField.name.toLowerCase()) {
+                        score += 20;
+                    }
+
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestMatch = userField.name;
+                    }
+                });
+
+                if (bestScore > 5 && bestMatch) {
+                    mapping[stdField.id] = bestMatch;
+                }
+            });
+
+            return mapping;
+        }
+
+        // 渲染映射表格
+        function renderMappingTable() {
+            const tbody = document.getElementById('mapping-body');
+            tbody.innerHTML = '';
+
+            const recommendedMapping = recommendMapping();
+
+            standardFields.forEach(stdField => {
+                const row = document.createElement('tr');
+
+                const sampleField = userFields.find(f => f.name === recommendedMapping[stdField.id]);
+                const sampleValue = sampleField ? sampleField.sample : '';
+
+                let selectHtml = `<select class="field-select" data-std-field="${stdField.id}">`;
+                selectHtml += `<option value="">-- 不映射 --</option>`;
+
+                userFields.forEach(userField => {
+                    const selected = recommendedMapping[stdField.id] === userField.name ? 'selected' : '';
+                    selectHtml += `<option value="${userField.name}" ${selected}>${userField.name} (${userField.type})</option>`;
+                });
+
+                selectHtml += '</select>';
+
+                row.innerHTML = `
+                    <td>
+                        <strong>${stdField.name}</strong>
+                        ${stdField.required ? '<span class="required-badge">必填</span>' : '<span class="optional-badge">可选</span>'}
+                    </td>
+                    <td>${stdField.description}</td>
+                    <td>${selectHtml}</td>
+                    <td><span class="type-badge type-${stdField.type}">${stdField.type}</span></td>
+                    <td class="sample-cell">${sampleValue || '-'}</td>
+                `;
+
+                tbody.appendChild(row);
+            });
+
+            document.querySelectorAll('.field-select').forEach(select => {
+                select.addEventListener('change', updateSampleValue);
+            });
+        }
+
+        function updateSampleValue(event) {
+            const select = event.target;
+            const stdFieldId = select.dataset.stdField;
+            const selectedField = select.value;
+            const row = select.closest('tr');
+            const sampleCell = row.querySelector('.sample-cell');
+
+            if (selectedField) {
+                const userField = userFields.find(f => f.name === selectedField);
+                sampleCell.textContent = userField ? userField.sample : '-';
+            } else {
+                sampleCell.textContent = '-';
+            }
+        }
+
+        async function saveMapping() {
+            const mapping = {};
+            let isValid = true;
+            const errors = [];
+
+            document.querySelectorAll('.field-select').forEach(select => {
+                const stdFieldId = select.dataset.stdField;
+                const selectedField = select.value;
+                const stdField = standardFields.find(f => f.id === stdFieldId);
+
+                if (selectedField) {
+                    mapping[stdField.name] = selectedField;
+                }
+
+                if (stdField.required && !selectedField) {
+                    isValid = false;
+                    errors.push(`${stdField.name} 是必填字段`);
+                    select.classList.add('error');
+                } else {
+                    select.classList.remove('error');
+                }
+            });
+
+            if (!isValid) {
+                alert('请填写以下必填字段：\n' + errors.join('\n'));
+                return;
+            }
+
+            document.getElementById('loading-overlay').style.display = 'flex';
+
+            try {
+                const response = await fetch('/api/configure-balance-fields', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ field_mapping: mapping })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    window.location.href = '/api-config';
+                } else {
+                    alert('保存失败: ' + result.error);
+                }
+            } catch (error) {
+                alert('保存失败: ' + error.message);
+            } finally {
+                document.getElementById('loading-overlay').style.display = 'none';
+            }
+        }
+
+        document.getElementById('auto-map-btn').addEventListener('click', renderMappingTable);
+        document.getElementById('reset-btn').addEventListener('click', () => {
+            document.querySelectorAll('.field-select').forEach(select => {
+                select.value = '';
+                const row = select.closest('tr');
+                const sampleCell = row.querySelector('.sample-cell');
+                sampleCell.textContent = '-';
+                select.classList.remove('error');
+            });
+        });
+        document.getElementById('save-mapping-btn').addEventListener('click', saveMapping);
+
+        document.addEventListener('DOMContentLoaded', renderMappingTable);
+    </script>
+</body>
+</html>

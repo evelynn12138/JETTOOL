@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>完整性测试 - DA数据清洗业务AI应用</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <a href="{{ url_for('api_config_page') }}" class="back-link">
+                    <i class="fas fa-arrow-left"></i>
+                </a>
+                <i class="fas fa-check-double"></i>
+                <h1>完整性测试</h1>
+            </div>
+            <div class="steps">
+                <div class="step completed">
+                    <span class="step-number">1</span>
+                    <span class="step-text">上传文件</span>
+                </div>
+                <div class="step completed">
+                    <span class="step-number">2</span>
+                    <span class="step-text">字段映射</span>
+                </div>
+                <div class="step completed">
+                    <span class="step-number">3</span>
+                    <span class="step-text">API配置</span>
+                </div>
+                <div class="step active">
+                    <span class="step-number">4</span>
+                    <span class="step-text">完整性测试</span>
+                </div>
+                <div class="step">
+                    <span class="step-number">5</span>
+                    <span class="step-text">查询分析</span>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <!-- 说明卡片 -->
+            <div class="config-card">
+                <div class="config-header">
+                    <h3><i class="fas fa-clipboard-check"></i> 财务数据完整性测试</h3>
+                    <p class="config-description">
+                        系统将对上传的序时账和科目余额表执行三项固化的完整性测试——凭证借贷平衡检查、科目发生额归零验证、两表交叉比对。一键全部跑完，差异明细可直接导出为底稿附件。
+                        本步骤为可选项，您可以选择跳过直接进入查询分析。
+                    </p>
+                </div>
+            </div>
+
+            <!-- 三项测试描述 -->
+            <div class="tests-overview">
+                <div class="test-card" data-test="journal">
+                    <div class="test-card-header">
+                        <i class="fas fa-book"></i>
+                        <h4>测试一：序时账完整性测试</h4>
+                    </div>
+                    <p>凭证借贷是否平衡——按凭证分组检查发生额，验证每张凭证的借贷方是否平衡</p>
+                </div>
+                <div class="test-card" data-test="balance">
+                    <div class="test-card-header">
+                        <i class="fas fa-balance-scale"></i>
+                        <h4>测试二：科目余额表完整性测试</h4>
+                    </div>
+                    <p>科目发生额是否归零——汇总期初余额、期末余额，计算发生额(期末-期初)汇总是否归零</p>
+                </div>
+                <div class="test-card" data-test="cross">
+                    <div class="test-card-header">
+                        <i class="fas fa-link"></i>
+                        <h4>测试三：序时账&科目余额表交叉验证</h4>
+                    </div>
+                    <p>两表数据能不能对上——按科目汇总，检查序时账与科目余额表的发生额是否一致</p>
+                </div>
+            </div>
+
+            <!-- 高级设置：反结转 + 末级科目 -->
+            <div class="config-card" style="margin-bottom: 24px;">
+                <div class="config-header">
+                    <h3><i class="fas fa-exchange-alt"></i> 高级设置</h3>
+                    <p class="config-description">
+                        根据您的数据特点选择合适的处理模式，系统将自动应用后再执行完整性测试。
+                    </p>
+                </div>
+
+                <div class="settings-section">
+                    <div class="reverse-cf-toggle">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="reverse-cf-checkbox">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <div class="toggle-label">
+                            <strong>启用反结转模式</strong>
+                            <p id="reverse-cf-hint">关闭时使用原始数据进行完整性测试（适用于 SAP 等无需反结转的系统）</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-section" style="border-top: 1px solid #e5e7eb; padding-top: 16px; margin-top: 16px;">
+                    <div class="reverse-cf-toggle">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="leaf-accounts-checkbox">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <div class="toggle-label">
+                            <strong>仅使用末级科目</strong>
+                            <p id="leaf-accounts-hint">
+                                开启后，系统将从科目余额表中筛选末级科目（剔除空行、含"计"行、非末级科目），
+                                再执行完整性测试和交叉验证
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 结果区域 -->
+            <div class="test-results" id="test-results" style="display: none;">
+                <!-- 结果通过JavaScript动态渲染 -->
+            </div>
+
+            <!-- 底部按钮 -->
+            <div class="action-buttons">
+                <button class="btn btn-secondary" id="skip-btn">
+                    <i class="fas fa-forward"></i> 跳过，直接进入查询
+                </button>
+                <button class="btn btn-primary" id="run-tests-btn">
+                    <i class="fas fa-play"></i> 运行完整性测试
+                </button>
+            </div>
+
+            <div class="loading-overlay" id="loading-overlay" style="display: none;">
+                <div class="loading-content">
+                    <div class="spinner"></div>
+                    <h3 id="loading-title">正在执行完整性测试...</h3>
+                    <p id="loading-message">请稍候，系统正在验证数据一致性</p>
+                </div>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <p>© 2026 DA数据清洗业务AI应用 - 审计数据智能查询与分析工具 V1.0</p>
+            <p class="disclaimer">提示：三项固化审计程序——凭证借贷平衡检查、科目发生额归零验证、两表交叉比对。</p>
+        </footer>
+    </div>
+
+    <script>
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const loadingTitle = document.getElementById('loading-title');
+        const loadingMessage = document.getElementById('loading-message');
+        const cfCheckbox = document.getElementById('reverse-cf-checkbox');
+        const cfHint = document.getElementById('reverse-cf-hint');
+        const leafCheckbox = document.getElementById('leaf-accounts-checkbox');
+        const leafHint = document.getElementById('leaf-accounts-hint');
+
+        // 反结转切换提示
+        cfCheckbox.addEventListener('change', function() {
+            if (this.checked) {
+                cfHint.innerHTML = '开启后，系统将：① 优先按科目编号4103识别结转损益凭证；'
+                    + '② 若无4103，按摘要同时含"结转"和"损益"识别；'
+                    + '③ 将结转损益金额从科目余额表期末余额中扣减；④ 使用调整后的数据执行三项测试。';
+            } else {
+                cfHint.innerHTML = '关闭时使用原始数据进行完整性测试（适用于 SAP 等无需反结转的系统）';
+            }
+        });
+
+        // 末级科目切换提示
+        leafCheckbox.addEventListener('change', function() {
+            if (this.checked) {
+                leafHint.innerHTML = '开启后，系统将：① 剔除科目编号为空的行；② 剔除科目编号含"计"的行（如合计、小计）；'
+                    + '③ 按公司+科目编号降序排列，保留末级科目（最细粒度的明细科目）；④ 使用筛选后的数据执行测试。';
+            } else {
+                leafHint.innerHTML = '关闭时使用科目余额表全部数据进行完整性测试';
+            }
+        });
+
+        // 运行测试
+        async function runTests() {
+            showLoading();
+
+            try {
+                const response = await fetch('/api/integrity-test/run', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        reverse_carry_forward: cfCheckbox.checked,
+                        leaf_accounts: leafCheckbox.checked
+                    })
+                });
+
+                const result = await response.json();
+                hideLoading();
+
+                if (!result.success && result.error) {
+                    alert('测试执行失败: ' + result.error);
+                    return;
+                }
+
+                if (!result.results) {
+                    alert('测试结果异常：数据格式错误');
+                    console.error('完整性测试返回数据:', JSON.stringify(result));
+                    return;
+                }
+
+                displayResults(result);
+            } catch (error) {
+                hideLoading();
+                alert('测试执行失败: ' + error.message);
+            }
+        }
+
+        // 显示结果
+        function displayResults(data) {
+            const container = document.getElementById('test-results');
+            container.style.display = 'block';
+
+            let html = '<div class="results-summary">';
+
+            // 汇总标题
+            const allPassed = data.all_passed;
+            const summary = data.summary || {};
+            let statusIcon, statusText, statusClass;
+
+            if (allPassed) {
+                statusIcon = 'fa-check-circle';
+                statusText = '所有测试均通过 ✓';
+                statusClass = 'status-pass';
+            } else {
+                statusIcon = 'fa-exclamation-triangle';
+                statusText = '存在异常，请查看详情';
+                statusClass = 'status-warn';
+            }
+
+            html += `
+                <div class="result-header-bar ${statusClass}">
+                    <i class="fas ${statusIcon}"></i>
+                    <div>
+                        <h4>完整性测试结果</h4>
+                        <p>${statusText}</p>
+                    </div>
+                    <div class="result-counts">
+                        <span class="count-badge count-completed">完成 ${summary.completed || 0}</span>
+                        <span class="count-badge count-skipped">跳过 ${summary.skipped || 0}</span>
+                        <span class="count-badge count-error">错误 ${summary.errors || 0}</span>
+                    </div>
+                </div>
+            `;
+
+            // 反结转信息
+            if (data.reverse_carry_forward_applied && data.carry_forward_info) {
+                const cf = data.carry_forward_info;
+                html += buildReverseCfInfo(cf);
+            }
+
+            // 末级科目信息
+            if (data.leaf_accounts_applied && data.leaf_accounts_info) {
+                const la = data.leaf_accounts_info;
+                html += `
+                    <div class="cf-info-card" style="border-color: rgba(139, 92, 246, 0.25); background: rgba(139, 92, 246, 0.05);">
+                        <div class="cf-info-header">
+                            <i class="fas fa-sitemap" style="color:#8b5cf6;"></i>
+                            <h4 style="color:#8b5cf6;">末级科目已应用</h4>
+                            <span class="test-badge badge-pass" style="background:rgba(139,92,246,0.1);color:#6d28d9;">已启用</span>
+                        </div>
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <span class="detail-label">原始科目数</span>
+                                <span class="detail-value">${la.original_count || 0}</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">末级科目数</span>
+                                <span class="detail-value">${la.leaf_count || 0}</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">剔除行数</span>
+                                <span class="detail-value value-warn">${(la.original_count || 0) - (la.leaf_count || 0)}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                if (la.error) {
+                    html += `<div class="balance-check check-fail"><i class="fas fa-exclamation-circle"></i> 末级科目筛选异常：${la.error}，已回退使用原始数据</div>`;
+                }
+            }
+
+            // 逐个测试结果
+            const tests = [
+                { key: 'journal_test', title: '测试一：序时账完整性测试', icon: 'fa-book' },
+                { key: 'balance_test', title: '测试二：科目余额表完整性测试', icon: 'fa-balance-scale' },
+                { key: 'cross_test', title: '测试三：序时账&科目余额表交叉验证', icon: 'fa-link' }
+            ];
+
+            tests.forEach(test => {
+                const resultData = data.results[test.key];
+                if (!resultData) return;
+
+                let statusBadge, detailsHtml = '';
+
+                if (resultData.status === 'skipped') {
+                    statusBadge = '<span class="test-badge badge-skipped">已跳过</span>';
+                    detailsHtml = `<p class="test-message">${resultData.message || '跳过'}</p>`;
+                } else if (resultData.status === 'error') {
+                    statusBadge = '<span class="test-badge badge-error">错误</span>';
+                    detailsHtml = `<p class="test-message test-error-message">${resultData.message || '执行失败'}</p>`;
+                } else if (resultData.status === 'completed') {
+                    statusBadge = resultData.passed
+                        ? '<span class="test-badge badge-pass">通过</span>'
+                        : '<span class="test-badge badge-fail">异常</span>';
+                    detailsHtml = buildTestDetails(test.key, resultData);
+                }
+
+                html += `
+                    <div class="test-result-card">
+                        <div class="test-result-header">
+                            <i class="fas ${test.icon}"></i>
+                            <h4>${test.title}</h4>
+                            ${statusBadge}
+                        </div>
+                        <div class="test-result-body">
+                            <p class="test-message">${resultData.message || ''}</p>
+                            ${detailsHtml}
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+
+            // 底部操作按钮
+            html += `
+                <div class="action-buttons" style="margin-top: 24px; display: flex; justify-content: space-between; align-items: center;">
+                    <button class="btn btn-secondary" onclick="exportResults()">
+                        <i class="fas fa-file-excel"></i> 导出Excel报告
+                    </button>
+                    <button class="btn btn-primary" onclick="goToQuery()">
+                        <i class="fas fa-arrow-right"></i> 进入查询分析
+                    </button>
+                </div>
+            `;
+
+            container.innerHTML = html;
+
+            // 滚动到结果区域
+            container.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function buildTestDetails(testKey, data) {
+            const details = data.details || {};
+            let html = '<div class="test-details">';
+
+            if (testKey === 'journal_test') {
+                html += `
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <span class="detail-label">分组数量</span>
+                            <span class="detail-value">${details.total_groups || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">汇总金额</span>
+                            <span class="detail-value">¥${formatNum(details.total_amount)}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">正数分组</span>
+                            <span class="detail-value">${details.positive_groups || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">负数分组</span>
+                            <span class="detail-value">${details.negative_groups || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">零值分组</span>
+                            <span class="detail-value">${details.zero_groups || 0}</span>
+                        </div>
+                    </div>
+                `;
+                if (details.groups_preview && details.groups_preview.length > 0) {
+                    html += '<div class="detail-table-wrapper"><table class="detail-table"><thead><tr>';
+                    const headers = Object.keys(details.groups_preview[0]);
+                    headers.forEach(h => { html += `<th>${h}</th>`; });
+                    html += '</tr></thead><tbody>';
+                    details.groups_preview.forEach(row => {
+                        html += '<tr>';
+                        headers.forEach(h => {
+                            let val = row[h];
+                            if (typeof val === 'number') val = '¥' + val.toFixed(2);
+                            html += `<td>${val != null ? val : '-'}</td>`;
+                        });
+                        html += '</tr>';
+                    });
+                    html += '</tbody></table></div>';
+                    if (details.total_groups_exceed_preview) {
+                        html += '<p class="detail-hint">仅显示前20条记录</p>';
+                    }
+                }
+            } else if (testKey === 'balance_test') {
+                html += `
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <span class="detail-label">期初余额合计</span>
+                            <span class="detail-value">¥${formatNum(details.total_beginning)}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">期末余额合计</span>
+                            <span class="detail-value">¥${formatNum(details.total_ending)}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">发生额合计(期末-期初)</span>
+                            <span class="detail-value ${Math.abs(details.total_occurrence) > 0.01 ? 'value-warn' : ''}">¥${formatNum(details.total_occurrence)}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">数据行数</span>
+                            <span class="detail-value">${details.row_count || 0}</span>
+                        </div>
+                    </div>
+                    <div class="balance-check ${details.balance_check_passed ? 'check-pass' : 'check-fail'}">
+                        <i class="fas ${details.balance_check_passed ? 'fa-check-circle' : 'fa-times-circle'}"></i>
+                        <span>${details.balance_check_message || ''}</span>
+                    </div>
+                `;
+            } else if (testKey === 'cross_test') {
+                const consistent = details.is_consistent;
+                html += `
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <span class="detail-label">汇总科目数</span>
+                            <span class="detail-value">${details.total_accounts || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">一致数量</span>
+                            <span class="detail-value" style="color: #10b981;">${details.consistent_count || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">差异数量</span>
+                            <span class="detail-value" style="color: ${details.difference_count > 0 ? '#ef4444' : '#10b981'};">${details.difference_count || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">仅有序时账</span>
+                            <span class="detail-value" style="color: ${details.only_in_journal > 0 ? '#f59e0b' : '#10b981'};">${details.only_in_journal || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">仅有余额表</span>
+                            <span class="detail-value" style="color: ${details.only_in_balance > 0 ? '#f59e0b' : '#10b981'};">${details.only_in_balance || 0}</span>
+                        </div>
+                    </div>
+                    <div class="balance-check ${consistent ? 'check-pass' : 'check-fail'}">
+                        <i class="fas ${consistent ? 'fa-check-circle' : 'fa-times-circle'}"></i>
+                        <span>${consistent ? '两表数据完全一致 ✓' : '两表数据存在差异，请查看下方详情'}</span>
+                    </div>
+                `;
+
+                // 显示差异记录
+                if (details.diff_records && details.diff_records.length > 0) {
+                    html += '<div class="detail-section"><h5><i class="fas fa-exclamation-triangle" style="color:#ef4444;"></i> 差异记录</h5>';
+                    html += '<table class="detail-table"><thead><tr>';
+                    const dHeaders = Object.keys(details.diff_records[0]);
+                    dHeaders.forEach(h => { html += `<th>${h}</th>`; });
+                    html += '</tr></thead><tbody>';
+                    details.diff_records.forEach(row => {
+                        html += '<tr>';
+                        dHeaders.forEach(h => {
+                            let val = row[h];
+                            if (typeof val === 'number') val = val.toFixed(2);
+                            html += `<td>${val != null ? val : '-'}</td>`;
+                        });
+                        html += '</tr>';
+                    });
+                    html += '</tbody></table>';
+                    if (details.has_more_diffs) {
+                        html += '<p class="detail-hint">仅显示前20条差异记录</p>';
+                    }
+                    html += '</div>';
+                }
+
+                // 仅有序时账的记录
+                if (details.only_journal_records && details.only_journal_records.length > 0) {
+                    html += '<div class="detail-section"><h5><i class="fas fa-info-circle" style="color:#f59e0b;"></i> 仅有序时账的记录</h5>';
+                    html += '<table class="detail-table"><thead><tr>';
+                    const jHeaders = Object.keys(details.only_journal_records[0]);
+                    jHeaders.forEach(h => { html += `<th>${h}</th>`; });
+                    html += '</tr></thead><tbody>';
+                    details.only_journal_records.forEach(row => {
+                        html += '<tr>';
+                        jHeaders.forEach(h => {
+                            let val = row[h];
+                            if (typeof val === 'number') val = val.toFixed(2);
+                            html += `<td>${val != null ? val : '-'}</td>`;
+                        });
+                        html += '</tr>';
+                    });
+                    html += '</tbody></table>';
+                    if (details.has_more_only_journal) {
+                        html += '<p class="detail-hint">仅显示前10条记录</p>';
+                    }
+                    html += '</div>';
+                }
+
+                // 仅有余额表的记录
+                if (details.only_balance_records && details.only_balance_records.length > 0) {
+                    html += '<div class="detail-section"><h5><i class="fas fa-info-circle" style="color:#f59e0b;"></i> 仅有余额表的记录</h5>';
+                    html += '<table class="detail-table"><thead><tr>';
+                    const bHeaders = Object.keys(details.only_balance_records[0]);
+                    bHeaders.forEach(h => { html += `<th>${h}</th>`; });
+                    html += '</tr></thead><tbody>';
+                    details.only_balance_records.forEach(row => {
+                        html += '<tr>';
+                        bHeaders.forEach(h => {
+                            let val = row[h];
+                            if (typeof val === 'number') val = val.toFixed(2);
+                            html += `<td>${val != null ? val : '-'}</td>`;
+                        });
+                        html += '</tr>';
+                    });
+                    html += '</tbody></table>';
+                    if (details.has_more_only_balance) {
+                        html += '<p class="detail-hint">仅显示前10条记录</p>';
+                    }
+                    html += '</div>';
+                }
+            }
+
+            html += '</div>';
+            return html;
+        }
+
+        // 反结转信息展示
+        function buildReverseCfInfo(cf) {
+            if (!cf) return '';
+            let html = `
+                <div class="cf-info-card">
+                    <div class="cf-info-header">
+                        <i class="fas fa-exchange-alt"></i>
+                        <h4>反结转已应用</h4>
+                        <span class="test-badge badge-pass">已启用</span>
+                    </div>
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <span class="detail-label">识别结转损益凭证</span>
+                            <span class="detail-value">${cf.cf_voucher_count || 0} 张</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">结转损益科目数</span>
+                            <span class="detail-value">${cf.cf_account_count || 0} 个</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">结转损益金额</span>
+                            <span class="detail-value value-warn">¥${formatNum(cf.cf_total_amount)}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">序时账剔除行数</span>
+                            <span class="detail-value">${cf.removed_journal_rows || 0} / ${cf.original_journal_rows || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">余额表</span>
+                            <span class="detail-value">${cf.balance_adjusted ? '已调整 ✓' : '未调整'}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            if (cf.error) {
+                html += `<div class="balance-check check-fail"><i class="fas fa-exclamation-circle"></i> 反结转执行异常：${cf.error}，已回退使用原始数据</div>`;
+            }
+            return html;
+        }
+
+        function formatNum(num) {
+            if (num == null) return '0.00';
+            return Number(num).toFixed(2).replace(/\d(?=(\d{3})+\.)/g, '$&,');
+        }
+
+        function showLoading() {
+            loadingOverlay.style.display = 'flex';
+        }
+
+        function hideLoading() {
+            loadingOverlay.style.display = 'none';
+        }
+
+        function goToQuery() {
+            window.location.href = '/query';
+        }
+
+        // 导出Excel报告
+        async function exportResults() {
+            try {
+                const response = await fetch('/api/integrity-test/export', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        reverse_carry_forward: cfCheckbox.checked,
+                        leaf_accounts: leafCheckbox.checked
+                    })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    alert('导出失败: ' + (err.error || response.statusText));
+                    return;
+                }
+
+                // 检查是否是JSON错误响应
+                const contentType = response.headers.get('content-type') || '';
+                if (contentType.includes('application/json')) {
+                    const err = await response.json();
+                    alert('导出失败: ' + (err.error || '未知错误'));
+                    return;
+                }
+
+                // 下载文件
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = '完整性测试结果.xlsx';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                alert('导出失败: ' + error.message);
+            }
+        }
+
+        // 事件监听
+        document.getElementById('run-tests-btn').addEventListener('click', runTests);
+        document.getElementById('skip-btn').addEventListener('click', goToQuery);
+
+        // 自动运行测试
+        document.addEventListener('DOMContentLoaded', () => {
+            // 页面加载后自动询问是否运行
+        });
+    </script>
+
+    <style>
+        .tests-overview {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .test-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            border-left: 4px solid #2563eb;
+            transition: transform 0.2s;
+        }
+
+        .test-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .test-card[data-test="balance"] {
+            border-left-color: #10b981;
+        }
+
+        .test-card[data-test="cross"] {
+            border-left-color: #8b5cf6;
+        }
+
+        .test-card-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .test-card-header i {
+            font-size: 20px;
+            color: #2563eb;
+        }
+
+        .test-card[data-test="balance"] .test-card-header i {
+            color: #10b981;
+        }
+
+        .test-card[data-test="cross"] .test-card-header i {
+            color: #8b5cf6;
+        }
+
+        .test-card-header h4 {
+            font-size: 15px;
+            color: #333;
+        }
+
+        .test-card p {
+            font-size: 13px;
+            color: #666;
+            line-height: 1.5;
+            padding-left: 30px;
+        }
+
+        .test-results {
+            margin-bottom: 24px;
+        }
+
+        .result-header-bar {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .result-header-bar.status-pass {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .result-header-bar.status-warn {
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+
+        .result-header-bar i {
+            font-size: 32px;
+        }
+
+        .result-header-bar.status-pass i {
+            color: #10b981;
+        }
+
+        .result-header-bar.status-warn i {
+            color: #f59e0b;
+        }
+
+        .result-header-bar h4 {
+            font-size: 18px;
+            color: #333;
+        }
+
+        .result-header-bar p {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .result-header-bar .result-counts {
+            margin-left: auto;
+            display: flex;
+            gap: 8px;
+        }
+
+        .count-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .count-completed {
+            background: rgba(16, 185, 129, 0.1);
+            color: #065f46;
+        }
+
+        .count-skipped {
+            background: rgba(107, 114, 128, 0.1);
+            color: #4b5563;
+        }
+
+        .count-error {
+            background: rgba(239, 68, 68, 0.1);
+            color: #991b1b;
+        }
+
+        .test-result-card {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .test-result-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .test-result-header i {
+            font-size: 20px;
+            color: #6b7280;
+        }
+
+        .test-result-header h4 {
+            flex: 1;
+            font-size: 16px;
+            color: #333;
+        }
+
+        .test-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .badge-pass {
+            background: rgba(16, 185, 129, 0.1);
+            color: #065f46;
+        }
+
+        .badge-fail {
+            background: rgba(239, 68, 68, 0.1);
+            color: #991b1b;
+        }
+
+        .badge-skipped {
+            background: rgba(107, 114, 128, 0.1);
+            color: #4b5563;
+        }
+
+        .badge-error {
+            background: rgba(239, 68, 68, 0.1);
+            color: #991b1b;
+        }
+
+        .test-message {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 16px;
+        }
+
+        .test-error-message {
+            color: #ef4444;
+        }
+
+        .test-details {
+            margin-top: 12px;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .detail-item {
+            background: #f9fafb;
+            padding: 12px 16px;
+            border-radius: 6px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .detail-label {
+            display: block;
+            font-size: 12px;
+            color: #6b7280;
+            margin-bottom: 4px;
+        }
+
+        .detail-value {
+            display: block;
+            font-size: 18px;
+            font-weight: 600;
+            color: #111827;
+        }
+
+        .value-warn {
+            color: #ef4444 !important;
+        }
+
+        .balance-check {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+
+        .check-pass {
+            background: rgba(16, 185, 129, 0.1);
+            color: #065f46;
+        }
+
+        .check-fail {
+            background: rgba(239, 68, 68, 0.1);
+            color: #991b1b;
+        }
+
+        .detail-section {
+            margin-top: 20px;
+        }
+
+        .detail-section h5 {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            font-size: 14px;
+            color: #333;
+        }
+
+        .detail-table-wrapper {
+            overflow-x: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+        }
+
+        .detail-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .detail-table th {
+            background: #f9fafb;
+            padding: 8px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #374151;
+            border-bottom: 1px solid #e5e7eb;
+            white-space: nowrap;
+        }
+
+        .detail-table td {
+            padding: 8px 12px;
+            border-bottom: 1px solid #e5e7eb;
+            color: #4b5563;
+        }
+
+        .detail-hint {
+            font-size: 12px;
+            color: #9ca3af;
+            margin-top: 8px;
+            text-align: center;
+        }
+
+        /* 反结转切换开关 */
+        .reverse-cf-toggle {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 20px;
+            background: #f9fafb;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 48px;
+            height: 26px;
+            flex-shrink: 0;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: #ccc;
+            border-radius: 26px;
+            transition: 0.3s;
+        }
+
+        .toggle-slider:before {
+            content: "";
+            position: absolute;
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background: #2563eb;
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(22px);
+        }
+
+        .toggle-label strong {
+            display: block;
+            font-size: 15px;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .toggle-label p {
+            font-size: 13px;
+            color: #666;
+            margin: 0;
+            line-height: 1.5;
+        }
+
+        /* 反结转信息卡片 */
+        .cf-info-card {
+            background: rgba(59, 130, 246, 0.08);
+            border: 1px solid rgba(59, 130, 246, 0.25);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .cf-info-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .cf-info-header i {
+            font-size: 20px;
+            color: #2563eb;
+        }
+
+        .cf-info-header h4 {
+            flex: 1;
+            font-size: 16px;
+            color: #2563eb;
+        }
+    </style>
+</body>
+</html>

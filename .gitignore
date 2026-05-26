@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Flask / Session
+flask_session/
+*.db
+*.log
+
+# Uploads / Temp
+temp/
+uploads/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Project data (remove sample files)
+sample.xlsx
+intro.html
+DA数据清洗业务AI应用.zip
+test_*.xlsx
+
+# Electron
+electron/node_modules/
+electron/dist/
+electron/build/
+
+# Claude
+.claude/
+
+# Environment
+.env
+*.env.local
