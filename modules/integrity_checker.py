@@ -215,7 +215,7 @@ class IntegrityChecker:
                 else:
                     select_parts.append(f'"{cname}"')
             self.engine._conn.execute(f"""
-                CREATE TEMP VIEW "{view_name}" AS
+                CREATE OR REPLACE TEMP VIEW "{view_name}" AS
                 SELECT {', '.join(select_parts)}
                 FROM "{tbl_key}"
             """)
@@ -438,7 +438,7 @@ class IntegrityChecker:
                 else:
                     select_parts.append(f'"{col}"')
             self.engine._conn.execute(f"""
-                CREATE TEMP VIEW _j_dir AS
+                CREATE OR REPLACE TEMP VIEW _j_dir AS
                 SELECT {', '.join(select_parts)}
                 FROM "{self.journal_table}"
             """)
@@ -468,7 +468,7 @@ class IntegrityChecker:
                 else:
                     select_parts.append(f'"{col}"')
             self.engine._conn.execute(f"""
-                CREATE TEMP VIEW _b_dir AS
+                CREATE OR REPLACE TEMP VIEW _b_dir AS
                 SELECT {', '.join(select_parts)}
                 FROM "{self.balance_table}"
             """)

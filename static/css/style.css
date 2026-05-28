@@ -53,7 +53,7 @@ body {
     display: flex;
     align-items: center;
     gap: 20px;
-    padding: 18px 28px;
+    padding: 24px 32px;
     background: var(--black);
 }
 
@@ -65,7 +65,7 @@ body {
 }
 
 .ey-logo {
-    height: 32px;
+    height: 40px;
     width: auto;
     display: block;
     padding-right: 18px;

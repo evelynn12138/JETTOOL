@@ -146,6 +146,20 @@
                             <div class="history-empty">暂无查询记录</div>
                         </div>
                     </div>
+
+                    <div class="history-card" id="saved-queries-card" style="display:none;">
+                        <h4>
+                            <i class="fas fa-star"></i> 收藏查询
+                            <span class="history-count" id="saved-count"></span>
+                        </h4>
+                        <div class="saved-query-actions" style="margin-bottom:10px;display:flex;gap:6px;">
+                            <button class="btn btn-small" id="select-all-saved-btn" style="flex:1;"><i class="fas fa-check-square"></i> 全选</button>
+                            <button class="btn btn-small" id="export-saved-btn" style="flex:1;"><i class="fas fa-file-excel"></i> 导出选中</button>
+                        </div>
+                        <div class="history-list" id="saved-queries-list">
+                            <div class="history-empty">暂无收藏查询</div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="query-main">
@@ -171,8 +185,8 @@
                                 <button class="btn btn-secondary" id="format-query-btn">
                                     <i class="fas fa-magic"></i> 优化表达
                                 </button>
-                                <button class="btn btn-primary" id="generate-code-btn">
-                                    <i class="fas fa-code"></i> 生成代码
+                                <button class="btn btn-primary" id="query-btn">
+                                    <i class="fas fa-search"></i> 查询
                                 </button>
                             </div>
                         </div>
@@ -250,6 +264,9 @@
                         <div class="result-header">
                             <h3><i class="fas fa-table"></i> 执行结果</h3>
                             <div class="result-actions">
+                                <button class="btn btn-small" id="save-query-btn">
+                                    <i class="fas fa-star"></i> 收藏
+                                </button>
                                 <button class="btn btn-small" id="export-csv-btn">
                                     <i class="fas fa-file-csv"></i> 导出CSV
                                 </button>
@@ -518,7 +535,50 @@
             }
         }
 
-        // 生成代码
+        // 一键查询（生成 + 自动执行）
+        async function queryNow() {
+            const query = document.getElementById('query-input').value.trim();
+            if (!query) {
+                alert('请输入查询语句');
+                return;
+            }
+            showLoading('正在查询...', 'AI正在分析需求并执行SQL');
+            let sqlCode = '';
+            try {
+                const genRes = await fetch('/api/generate-code', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query })
+                });
+                const genData = await genRes.json();
+                if (!genData.success) throw new Error(genData.error || 'SQL生成失败');
+                sqlCode = genData.code;
+                codeMirrorEditor.setValue(sqlCode);
+                showLoading('正在查询...', '正在执行SQL查询');
+                const execRes = await fetch('/api/execute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code: sqlCode })
+                });
+                const execData = await execRes.json();
+                if (execData.success) {
+                    currentResultData = execData.result;
+                    displayResult(execData.result);
+                    loadQueryHistory();
+                    {% if has_review_config %}
+                    reviewCode(sqlCode, query);
+                    {% endif %}
+                } else {
+                    throw new Error(execData.error || 'SQL执行失败');
+                }
+            } catch (error) {
+                showError('查询失败: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 生成代码（保留供手动使用）
         async function generateCode() {
             const query = document.getElementById('query-input').value.trim();
 
@@ -546,8 +606,10 @@
                     document.getElementById('code-explanation').style.display = 'none';
                     showSuccess('代码生成成功！');
                     loadQueryHistory();
-                    // 自动触发代码复核
+                    // 自动触发代码复核（仅当配置了复核模型时）
+                    {% if has_review_config %}
                     reviewCode(result.code, query);
+                    {% endif %}
                 } else {
                     throw new Error(result.error || '代码生成失败');
                 }
@@ -1001,6 +1063,167 @@
             }
         }
 
+        // ===== 收藏查询 =====
+        const savedQueryModalOpen = {}; // track checkbox state
+
+        async function saveQuery() {
+            const queryInput = document.getElementById('query-input').value.trim();
+            if (!queryInput) { alert('请先执行查询'); return; }
+            if (!currentResultData) { alert('没有可收藏的查询结果'); return; }
+
+            const name = prompt('为这个查询命名（可选）：', queryInput.substring(0, 40));
+            if (name === null) return; // cancelled
+
+            showLoading('正在保存...', '');
+            try {
+                const res = await fetch('/api/saved-queries', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: name || queryInput.substring(0, 40),
+                        query: queryInput,
+                        sql: codeMirrorEditor ? codeMirrorEditor.getValue() : '',
+                        result_data: currentResultData
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showSuccess('查询已收藏！');
+                    loadSavedQueries();
+                } else {
+                    showError(data.error || '保存失败');
+                }
+            } catch (e) {
+                showError('保存失败: ' + e.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function loadSavedQueries() {
+            try {
+                const res = await fetch('/api/saved-queries');
+                const data = await res.json();
+                if (!data.success) return;
+                const card = document.getElementById('saved-queries-card');
+                const list = document.getElementById('saved-queries-list');
+                const count = document.getElementById('saved-count');
+                if (!list) return;
+                if (!data.queries || data.queries.length === 0) {
+                    card.style.display = 'none';
+                    return;
+                }
+                card.style.display = 'block';
+                if (count) count.textContent = data.queries.length;
+
+                list.innerHTML = data.queries.map(q => `
+                    <div class="saved-query-item" data-id="${q.id}">
+                        <label class="saved-query-checkbox" onclick="event.stopPropagation();">
+                            <input type="checkbox" class="saved-query-check" value="${q.id}">
+                        </label>
+                        <div class="saved-query-info" onclick="restoreSavedQuery('${q.id}')">
+                            <div class="saved-query-name" title="${escapeHtml(q.name)}">${escapeHtml(q.name)}</div>
+                            <div class="saved-query-meta">
+                                <span>${escapeHtml(q.timestamp)}</span>
+                                <span>${q.row_count != null ? q.row_count + ' 行' : ''}</span>
+                            </div>
+                        </div>
+                        <button class="saved-query-del" onclick="deleteSavedQuery('${q.id}')" title="删除">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                `).join('');
+            } catch (e) {
+                console.error('加载收藏查询失败:', e);
+            }
+        }
+
+        async function deleteSavedQuery(id) {
+            if (!confirm('确定删除这条收藏查询？')) return;
+            try {
+                const res = await fetch('/api/saved-queries/' + id, { method: 'DELETE' });
+                const data = await res.json();
+                if (data.success) {
+                    showSuccess('已删除');
+                    loadSavedQueries();
+                } else {
+                    showError(data.error || '删除失败');
+                }
+            } catch (e) {
+                showError('删除失败: ' + e.message);
+            }
+        }
+
+        function restoreSavedQuery(id) {
+            // 点击收藏项，将查询文本恢复到输入框
+            const card = document.getElementById('saved-queries-card');
+            if (!card) return;
+            const checkboxes = card.querySelectorAll('.saved-query-check');
+            let name = '';
+            checkboxes.forEach(cb => {
+                if (cb.value === id) {
+                    // find the name from the parent DOM
+                    const item = cb.closest('.saved-query-item');
+                    const nameEl = item ? item.querySelector('.saved-query-name') : null;
+                    if (nameEl) name = nameEl.textContent;
+                }
+            });
+            // 从列表里找对应的 name
+            const items = card.querySelectorAll('.saved-query-item');
+            items.forEach(item => {
+                if (item.dataset.id === id) {
+                    const nameEl = item.querySelector('.saved-query-name');
+                    if (nameEl) name = nameEl.textContent;
+                }
+            });
+            if (name) {
+                document.getElementById('query-input').value = name;
+                document.getElementById('query-input').scrollIntoView({ behavior: 'smooth' });
+            }
+        }
+
+        function toggleSelectAllSaved() {
+            const checkboxes = document.querySelectorAll('.saved-query-check');
+            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+            checkboxes.forEach(cb => cb.checked = !allChecked);
+        }
+
+        async function exportSelectedSaved() {
+            const checkboxes = document.querySelectorAll('.saved-query-check:checked');
+            if (checkboxes.length === 0) {
+                alert('请先勾选要导出的收藏查询');
+                return;
+            }
+            const ids = Array.from(checkboxes).map(cb => cb.value);
+            showLoading('正在导出...', '正在生成多 Sheet Excel');
+            try {
+                const res = await fetch('/api/export-saved-queries', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids })
+                });
+                if (res.ok) {
+                    const blob = await res.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = '收藏查询汇总.xlsx';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                    showSuccess('导出成功！');
+                } else {
+                    const err = await res.json();
+                    throw new Error(err.error || '导出失败');
+                }
+            } catch (e) {
+                showError('导出失败: ' + e.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
         function escapeHtml(text) {
             const d = document.createElement('div');
             d.textContent = text;
@@ -1265,8 +1488,8 @@
             // 优化表达按钮
             document.getElementById('format-query-btn').addEventListener('click', optimizeQuery);
 
-            // 生成代码按钮
-            document.getElementById('generate-code-btn').addEventListener('click', generateCode);
+            // 查询按钮
+            document.getElementById('query-btn').addEventListener('click', queryNow);
 
             // 解释代码按钮
             document.getElementById('explain-code-btn').addEventListener('click', explainCode);
@@ -1291,8 +1514,14 @@
             document.getElementById('export-csv-btn').addEventListener('click', () => exportData('csv'));
             document.getElementById('export-excel-btn').addEventListener('click', () => exportData('xlsx'));
 
-            // 加载查询历史
+            // 收藏查询按钮
+            document.getElementById('save-query-btn').addEventListener('click', saveQuery);
+            document.getElementById('select-all-saved-btn').addEventListener('click', toggleSelectAllSaved);
+            document.getElementById('export-saved-btn').addEventListener('click', exportSelectedSaved);
+
+            // 加载查询历史 & 收藏查询
             loadQueryHistory();
+            loadSavedQueries();
 
             // 加载内联筛选规则
             loadInlineRules();
@@ -2367,6 +2596,66 @@
         }
         .review-aspect-warn {
             color: #d97706;
+        }
+
+        /* 收藏查询 */
+        .saved-query-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 8px;
+            border-bottom: 1px solid #f3f4f6;
+            border-radius: 4px;
+            cursor: default;
+            transition: background 0.15s;
+        }
+        .saved-query-item:hover {
+            background: #f3f4f6;
+        }
+        .saved-query-checkbox {
+            display: flex;
+            align-items: center;
+            flex-shrink: 0;
+        }
+        .saved-query-checkbox input[type="checkbox"] {
+            width: 14px;
+            height: 14px;
+            cursor: pointer;
+        }
+        .saved-query-info {
+            flex: 1;
+            min-width: 0;
+            cursor: pointer;
+            padding: 2px 0;
+        }
+        .saved-query-name {
+            font-size: 13px;
+            color: #374151;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-weight: 500;
+        }
+        .saved-query-meta {
+            display: flex;
+            gap: 8px;
+            font-size: 11px;
+            color: #9ca3af;
+            margin-top: 2px;
+        }
+        .saved-query-del {
+            background: none;
+            border: none;
+            color: #d1d5db;
+            cursor: pointer;
+            padding: 4px;
+            font-size: 12px;
+            flex-shrink: 0;
+            border-radius: 4px;
+        }
+        .saved-query-del:hover {
+            color: #ef4444;
+            background: #fef2f2;
         }
     </style>
 </body>

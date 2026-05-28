@@ -70,6 +70,8 @@ DA数据清洗业务AI应用/
   步骤1         步骤2          步骤3           步骤4             步骤5
 ```
 
+> 注：原流程中步骤 3（API 配置）和步骤 2（字段映射）已对调，使字段映射页可调用 AI 做智能映射。
+
 ### 第 1 步：上传文件
 - 支持格式：`.xlsx`、`.xls`、`.csv`
 - 最大文件 50MB
@@ -89,9 +91,13 @@ DA数据清洗业务AI应用/
   - 留空则复用主模型配置
 
 ### 第 3 步：字段映射
-- 前端将文件原始字段映射到标准字段（11 个序时账字段 + 9 个科目余额表字段）
+- 前端将文件原始字段映射到标准字段（11 个序时账字段 + 科目余额表字段）
 - 映射格式：`{标准字段名: 源字段名}`
 - **AI 智能映射**：点击"AI 智能映射"按钮 → `POST /api/auto-map-fields` → AI 根据列名/类型/样本值自动推荐映射
+- **科目余额表格式选择**：支持两种格式
+  - **已有期初/期末**（calculated）：直接映射期初余额、期末余额字段
+  - **借贷方计算**（debit_credit）：映射期初借方/贷方、期末借方/贷方，由 DuckDB 自动计算 `期初余额 = 期初借方 - 期初贷方`，`期末余额 = 期末借方 - 期末贷方`
+  - 选择结果存入 `session['balance_format']`
 - 提交：`POST /api/configure-fields`
 - 后端保存映射到 session，导入数据到 DuckDB，计算 `mapped_fields` 和 `mapped_preview`
 - 支持历史映射匹配：`POST /api/mapping-history/match` 模糊匹配历史映射
@@ -100,6 +106,12 @@ DA数据清洗业务AI应用/
 - 基于 DuckDB SQL 的三项固化测试（非 Pandas）
 - 支持反结转模式（reverse_carry_forward）和末级科目模式（leaf_accounts）
 - 结果可导出为 Excel：`POST /api/integrity-test/export`
+- **AI 引导式问答助手**：内置导向式决策树对话流程
+  - AI 引导用户确认：ERP 系统、方向调整、反结转、末级科目、排除规则
+  - 根据用户反馈动态调用工具执行测试
+  - 支持对话中导出测试报告（PDF 格式的报告摘要 + Excel 文件下载）
+  - 历史对话在重新导入数据时自动清除（`session.pop('integrity_chat_history')`）
+  - 端点：`POST /integrity-chat`
 
 ### 第 5 步：查询分析
 - 用户输入自然语言 → 同义词扩展（本地词典 + AI 优化）→ `POST /api/generate-code` → AI 生成 DuckDB SQL
@@ -201,7 +213,40 @@ class AICodeGenerator:
 - 使用原始 JE 金额（不调整方向）
 - 在 `_setup_carry_forward_views()` 中构建：`("科目编号" = '4103') OR ("摘要" LIKE '%结转%' AND "摘要" LIKE '%损益%')`
 
-### 4.5 同义词词典（`modules/synonym_dict.py`）
+### 4.5 AI 完整性测试助手（`app.py` — `integrity_chat` 路由）
+
+**位置**：`POST /integrity-chat`（位于 `app.py`，非独立模块）
+
+**技术特点：**
+- 使用 OpenAI-compatible Function Calling（tools 参数）驱动多轮对话
+- 最大 5 轮 tool-calling 递归
+- 定义 8 个 `INTEGRITY_TOOLS`：
+  1. `run_all_tests` — 执行全部 3 项测试（可选参数：方向调整、排除规则、反结转、末级科目）
+  2. `get_journal_analysis` — 序时账单项分析
+  3. `get_balance_analysis` — 余额表单项分析
+  4. `run_cross_validation` — 交叉验证
+  5. `export_report` — 导出完整报告为 Excel（base64 嵌入返回）
+  6. `get_session_info` — 获取当前会话配置（字段映射、balance_format、AI 供应商等）
+  7. `set_exclusions` — 设置排除规则
+  8. `get_test_info` — 获取测试结果摘要
+
+**导向式决策树工作流（`INTEGRITY_SYSTEM_PROMPT`）：**
+1. 欢迎并获取会话信息
+2. 询问 ERP 系统类型（影响方向调整判断）
+3. 询问是否做方向调整
+4. 询问反结转模式
+5. 询问末级科目模式
+6. 询问排除规则（空凭证编号、合计行等）
+7. 执行自定义配置的全面测试
+8. 展示结果并询问是否需要导出或深入分析
+
+**防幻觉机制：**
+- `export_report` 实际调用 DuckDB 重新计算全量明细生成 Excel（不依赖缓存）
+- 后端兜底：检测用户含"导出/报告/下载"关键词但 AI 未调工具时，强制导出
+- 成功导出后 AI 回复被固定为"报告已生成，请点击下载"（杜绝 AI 虚构下载链接）
+- 工具调用前自动重建 trim/direction 临时视图（`CREATE OR REPLACE TEMP VIEW`）
+
+### 4.6 同义词词典（`modules/synonym_dict.py`）
 
 ```python
 SYNONYM_MAP = {
@@ -220,7 +265,7 @@ def expand_keywords(text: str) -> str
 - `expand_keywords()`：匹配到关键词后追加"等相关关键词"（不使用括号标注，避免误导 SQL 生成）
 - 查询优化流程：本地词典扩展 → AI 优化（合并两者结果）
 
-### 4.6 其他模块
+### 4.7 其他模块
 
 **`crypto_utils.py`**：
 - 使用 `cryptography.fernet.Fernet` 对称加密
@@ -278,6 +323,7 @@ def expand_keywords(text: str) -> str
 | `upload_options` | dict | 序时账上传配置（sheet_name, header_row） |
 | `balance_filepath` | str | 科目余额表文件路径 |
 | `balance_data_info` | dict | 科目余额表分析结果 |
+| `balance_format` | str | 科目余额表格式 `'calculated'` 或 `'debit_credit'` |
 | `balance_field_mapping` | dict | 科目余额表字段映射 |
 | `balance_upload_options` | dict | 科目余额表上传配置 |
 | `api_key` | str | 加密后的 API Key（主模型） |
@@ -288,6 +334,7 @@ def expand_keywords(text: str) -> str
 | `review_model` | str | 复核模型名 |
 | `review_api_url` | str | 复核模型自定义 API 地址 |
 | `integrity_results` | dict | 完整性测试结果 |
+| `integrity_chat_history` | list | 问答助手的多轮对话历史（`[{role, content}]`） |
 | `last_execution_result` | dict | 上次查询执行结果 |
 | `query_history` | list | 查询历史记录 |
 | `manual_fills` | dict | 手动填充的常量列 |
@@ -323,6 +370,8 @@ def expand_keywords(text: str) -> str
 | POST | `/api/integrity-test/run` | 运行完整性测试（支持反结转/末级科目模式） |
 | GET | `/api/integrity-test/results` | 获取上次测试结果 |
 | POST | `/api/integrity-test/export` | 导出测试结果为 Excel（4 sheet） |
+| POST | `/integrity-chat` | 完整性测试 AI 引导问答（多轮对话，tool-calling 驱动） |
+| POST | `/api/integrity-test/ai-analyze` | AI 分析异常测试结果（审计视角） |
 | GET | `/api/mapping-history/check` | 检查是否有匹配的历史映射 |
 | POST | `/api/mapping-history/apply` | 应用历史映射 |
 | GET | `/api/preset-rules/packs` | 获取规则包列表 |
@@ -479,14 +528,44 @@ session['data_info'] = data_info  # 必须重新赋值
 - 未配置 API Key → 重定向到 `/api-config`
 - 这是为了保护 AI 智能映射功能可用
 
-### 8. 金额字段方向处理
-完整性测试中的结转损益金额使用原始 JE 金额，不做方向调整（正负即借贷方向）。
+### 8. 结转损益金额有三条路径，必须一致
+
+结转损益金额涉及三条路径，逻辑必须对齐：
+
+**路径 A：`IntegrityChecker.run_all()` / `export_report()`（核心基准）**
+- [`integrity_checker.py`](modules/integrity_checker.py) 中 SQL_CF_VOUCHERS + SQL_CF_AMOUNTS
+- 先方向调整（`_setup_direction_views()` → `_j_dir`），再找匹配凭证
+- **凭证级匹配**：DISTINCT 公司名+日期+凭证号，再 JOIN 回原表**汇总整张凭证的全部金额**
+- 结果 = Sum(整张结转损益凭证的所有行，金额已方向调整)
+
+**路径 B：前端仪表盘（已删除）**
+- 曾用 `refreshDirectCfAmount()` 独立查询 `"data"` 原始表
+- 但仅汇总**单行匹配**（非整张凭证），且异步调用覆盖了路径 A 的正确值
+- ✅ 已删除此函数，统一使用路径 A 的 `carry_forward_info.cf_total_amount`
+
+**路径 C：Chat Assistant `export_report` 工具**
+- [`app.py:969`](app.py#L969) 调用 `checker.export_report()`
+- 复用 IntegrityChecker，与路径 A 完全一致
+
+**注意**：路径 A 的金额是"整张结转损益凭证"的合计数，大于仅匹配行的金额。这是因为结转账中通常包含多个科目行，只有部分行科目编号=4103，但整张凭证都应视为结转损益处理。
 
 ### 9. strftime 替换
 DuckDB 支持 `strftime`，但为了兼容性，代码生成器 `_fix_strftime()` 会将其替换为标准 SQL：
 - `%Y-%m-%d` → `CAST(CAST(col AS DATE) AS VARCHAR)`
 - `%Y-%m` → `CAST(DATE_TRUNC('month', CAST(col AS DATE)) AS VARCHAR)`
 - `%Y` → `CAST(EXTRACT(YEAR FROM CAST(col AS DATE)) AS VARCHAR)`
+
+### 10. 完整性助手视图冲突
+`integrity_chat` 多轮 tool-calling 中，多次调用会反复创建临时视图。解决方案：使用 `CREATE OR REPLACE TEMP VIEW` 替代 `CREATE TEMP VIEW`。
+
+### 11. 借贷方计算余额表的完整性测试
+当 `balance_format === 'debit_credit'` 时：
+- 导入时在 DuckDB 中 `ALTER TABLE ADD COLUMN` 计算 `期初余额 = 期初借方 - 期初贷方`，`期末余额 = 期末借方 - 期末贷方`
+- 方向调整不适用于计算出的余额（科目余额表没有借贷方方向，余额本身就是净额）
+- 余额表测试和交叉验证仍按标准字段名（期初余额/期末余额）即可执行
+
+### 12. 字段映射页面格式切换不生效的排查
+`renderBalanceMapping` 定义在 `DOMContentLoaded` 回调内部，而 `onBalanceFormatChange` 从 radio button 的 `onchange` 属性调用，后者是全局函数无法访问回调内局部函数。解决方案：`onBalanceFormatChange` 直接调用全局 `renderMappingTable`。
 
 ---
 
@@ -530,6 +609,7 @@ lsof -ti:5003 | xargs kill -9
 | numpy | 1.26.0 | 数值计算 |
 | requests | 2.31.0 | 调用 AI API |
 | openpyxl | 3.1.2 | Excel 读写 |
+| xlrd | 1.2.0 | 旧版 .xls 文件支持 |
 | cryptography | 41.0+ | API Key 加密（Fernet） |
 | Werkzeug | 3.0.1 | Flask 依赖 |
 | python-dotenv | 1.0.0 | 环境变量加载 |

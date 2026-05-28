@@ -233,6 +233,7 @@ def upload_page():
     session.pop('field_mapping', None)
     session.pop('balance_field_mapping', None)
     session.pop('integrity_results', None)
+    session.pop('integrity_chat_history', None)
     session.pop('last_execution_result', None)
     session.pop('pending_filepath', None)
     session.pop('pending_filename', None)
@@ -489,6 +490,608 @@ def export_integrity_results():
         return jsonify({'success': False, 'error': f'导出失败: {str(e)}'})
 
 
+# ====== 完整性测试 AI 多轮对话 ======
+
+INTEGRITY_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_session_info",
+            "description": "查询当前会话的数据信息：已上传的表、每张表的字段列表、字段映射状态。在任何引导对话开始时调用此工具",
+            "parameters": {"type": "object", "properties": {}, "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_journal",
+            "description": "运行测试一：序时账完整性测试——按凭证分组检查借贷是否平衡",
+            "parameters": {"type": "object", "properties": {}, "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_balance",
+            "description": "运行测试二：科目余额表完整性测试——检查期初期末发生额是否归零",
+            "parameters": {"type": "object", "properties": {}, "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cross_validate",
+            "description": "运行测试三：交叉验证——对比序时账和科目余额表的金额差异（需要已导入科目余额表）",
+            "parameters": {"type": "object", "properties": {}, "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_all_tests",
+            "description": "一键运行全部三项完整性测试，支持完整配置参数（方向调整、反结转、末级科目、剔除规则）。请在收集完用户所有配置后调用",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "direction_adjustment": {
+                        "type": "boolean",
+                        "description": "是否启用借正贷负方向调整。如果数据中有'方向'字段且值为借/贷，设为true"
+                    },
+                    "reverse_carry_forward": {
+                        "type": "boolean",
+                        "description": "是否启用反结转处理（剔除结转损益凭证）。国产ERP通常需要"
+                    },
+                    "cf_account_code": {
+                        "type": "string",
+                        "description": "自定义未分配利润/本年利润科目号，如4103、410303。仅当reverse_carry_forward=true时有效，不填则默认用4103"
+                    },
+                    "cf_keywords": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "自定义摘要关键词，用于识别结转凭证。仅当reverse_carry_forward=true时有效，不填则默认['结转', '损益']"
+                    },
+                    "leaf_accounts": {
+                        "type": "boolean",
+                        "description": "是否仅用末级科目（从科目余额表中筛选末级科目）"
+                    },
+                    "exclude_empty_voucher": {
+                        "type": "boolean",
+                        "description": "是否剔除序时账中凭证编号为空的记录"
+                    },
+                    "exclude_balance_total": {
+                        "type": "boolean",
+                        "description": "是否剔除科目余额表中科目编号或名称包含'合计'的行"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_cf_info",
+            "description": "获取结转损益金额详情（反结转模式的调整依据）",
+            "parameters": {"type": "object", "properties": {}, "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_leaf_info",
+            "description": "获取末级科目筛选信息",
+            "parameters": {"type": "object", "properties": {}, "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "export_report",
+            "description": "导出完整性测试报告为Excel文件",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reverse_carry_forward": {
+                        "type": "boolean",
+                        "description": "是否启用反结转模式"
+                    },
+                    "leaf_accounts": {
+                        "type": "boolean",
+                        "description": "是否仅用末级科目"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+]
+
+INTEGRITY_SYSTEM_PROMPT = """你是"完整性测试助手"，担任用户的**审计数据完整性测试向导**。
+
+## 你的角色
+你不是简单的工具执行器，而是引导用户一步步完成完整性测试配置的**审计顾问**。你的核心任务是：
+1. 通过提问了解用户的数据背景和需求
+2. 根据用户的回答做出专业判断和建议
+3. 收集完所有配置后，一次性执行测试
+4. 用审计视角解读结果
+
+## 引导流程（必须按顺序）
+
+### 第一步：开场 + 查询数据状态
+- 先调用 get_session_info 了解当前数据情况
+- 根据数据状态（有序时账？有科目余额表？字段映射了哪些？）向用户简要汇报
+- 然后开始引导提问
+
+### 第二步：了解数据来源
+- 问用户：「财务数据来源什么系统？」
+- 常见选项：SAP / Oracle / 用友 / 金蝶 / QAD / 浪潮 / 鼎捷 / Microsoft Dynamics ...
+- **国产ERP（用友/金蝶/浪潮/鼎捷等）→ 提醒可能需要反结转处理**
+- **进口ERP（SAP/Oracle/QAD/Dynamics等）→ 通常不需要反结转**
+
+### 第三步：询问借正贷负（方向调整）
+- 问：「是否需要做借正贷负处理？即序时账金额是否需要根据借贷方向调整正负号？」
+- 如果用户说需要：
+  - 用 get_session_info 查方向字段是否已映射
+  - 如果方向字段已映射 → 告知用户会自动处理
+  - 如果方向字段未映射 → **提醒用户先回字段映射页面添加"方向"字段映射**
+- 如果用户说不需要 → 跳过（金额原值入账）
+
+### 第四步：询问反结转
+- 问：「是否需要做反结转处理（剔除结转损益凭证）？」
+- 如果用户说需要：
+  - 问：「未分配利润/本年利润科目号是多少？」
+  - 如果用户知道 → 记下科目号
+  - 如果用户不知道 → 建议：金蝶/用友常见为4103，或者在摘要中搜索包含"结转"和"损益"的凭证
+  - 用户可能给出自定义的科目号（如410303、41030101等）或自定义关键词，全部接受
+- 如果用户说不需要 → 跳过
+
+### 第五步：询问末级科目
+- 问：「是否需要提取末级科目？即只使用科目余额表中底层科目，剔除上级汇总科目」
+- 根据用户回答决策
+
+### 第六步：询问剔除规则
+- 问：「是否需要剔除特定数据？例如：」
+  - 序时账：剔除凭证编号为空的记录？
+  - 科目余额表：剔除包含"合计"、"小计"等汇总行？
+  - 其他自定义剔除需求
+
+### 第七步：汇总确认
+- 将以上全部配置整理成清单，让用户确认
+- 确认后调用 run_all_tests 一次性执行
+
+### 第八步：解读结果
+- 呈现测试结果，从审计视角分析异常原因
+- 给出专业建议
+
+## 工具使用规则
+1. **get_session_info**：在每次对话开始时必须先调用，了解数据状态
+2. **run_all_tests**：所有配置收集完毕后，统一调用此工具，一次性传入全部参数
+3. **check_journal / check_balance / cross_validate**：用户要求单独运行某项时使用
+4. **get_cf_info / get_leaf_info**：用户询问细节时使用
+5. **export_report**：用户要求导出报告时使用
+
+## 行为准则
+1. 用简洁清晰的中文沟通，一次只问1-2个问题
+2. 每一步给出专业建议，不只是问问题
+3. 用户可能使用专业术语或会计科目号，灵活理解
+4. 不要在用户确认前擅自执行测试
+5. 不要编造工具返回数据之外的任何内容
+6. 如果 get_session_info 显示无数据，引导用户先上传文件
+
+## 禁止行为
+1. **禁止编造工具返回数据**：所有结果必须来自工具实际返回值
+2. **禁止声称生成了文件或下载链接**：唯一文件输出通过 export_report 工具的返回
+3. **禁止自行编造测试配置**：所有参数必须来自用户的回答
+4. **不要在问完问题前就跑测试**：必须收集完完整配置再执行"""
+
+
+def _execute_integrity_tool(tool_name: str, arguments: dict) -> dict:
+    """执行完整性测试工具，返回格式化结果"""
+    from modules.integrity_checker import IntegrityChecker
+    engine = get_duckdb_engine()
+    table_name = 'data' if engine.table_exists('data') else None
+    balance_table = 'balance_data' if engine.table_exists('balance_data') else None
+
+    if tool_name in ('check_journal', 'run_all_tests', 'cross_validate', 'get_leaf_info') and not table_name:
+        return {"error": "序时账数据为空，请先上传并配置字段映射"}
+
+    checker = IntegrityChecker(engine, journal_table=table_name or 'data',
+                               balance_table=balance_table)
+
+    # 单个测试工具需要与 run_all() 一致的视图预处理（trim + 方向调整）
+    if tool_name in ('check_journal', 'check_balance', 'cross_validate'):
+        try:
+            checker._setup_trim_views()
+            checker._setup_direction_views()
+        except Exception:
+            pass
+
+    # 会话信息查询工具
+    if tool_name == 'get_session_info':
+        info = {'tables': []}
+        if table_name:
+            info['tables'].append('序时账')
+            info['journal_columns'] = [{'name': c['name'], 'type': c['type']}
+                                       for c in engine.get_schema(table_name)]
+        if balance_table:
+            info['tables'].append('科目余额表')
+            info['balance_columns'] = [{'name': c['name'], 'type': c['type']}
+                                       for c in engine.get_schema(balance_table)]
+        info['journal_mapping'] = session.get('field_mapping', {})
+        info['balance_mapping'] = session.get('balance_field_mapping', {})
+        info['balance_format'] = session.get('balance_format', 'calculated')
+        return {"result": json_module.dumps(info, ensure_ascii=False, default=str)}
+
+    try:
+        if tool_name == 'check_journal':
+            r = checker.test_journal_integrity()
+            d = r.get('details', {})
+            if r.get('status') == 'error':
+                return {"result": f"❌ 序时账完整性测试执行失败: {r.get('message', '')}"}
+            passed = r.get('passed', False)
+            lines = [f"{'✅' if passed else '❌'} 序时账完整性测试: {'通过' if passed else '未通过'}"]
+            lines.append(f"  说明: {r.get('message', '')}")
+            lines.append(f"  汇总金额: {d.get('total_amount', 0)}")
+            lines.append(f"  分组数: 正数{d.get('positive_groups', 0)} / 负数{d.get('negative_groups', 0)} / 零值{d.get('zero_groups', 0)}")
+            if not passed and d.get('groups_preview'):
+                lines.append("  差异明细（非零分组）：")
+                for g in d['groups_preview'][:5]:
+                    amt = g.get('汇总发生额', 0)
+                    if abs(amt or 0) > 0.01:
+                        lines.append(f"    凭证{g.get('凭证号','')} 金额{amt}")
+            return {"result": "\n".join(lines)}
+
+        elif tool_name == 'check_balance':
+            r = checker.test_balance_integrity()
+            d = r.get('details', {})
+            if r.get('status') == 'error':
+                return {"result": f"❌ 科目余额表测试执行失败: {r.get('message', '')}"}
+            if r.get('status') == 'skipped':
+                return {"result": "⏭ 科目余额表测试已跳过（无科目余额表数据）"}
+            passed = r.get('passed', False)
+            lines = [f"{'✅' if passed else '❌'} 科目余额表完整性测试: {'通过' if passed else '未通过'}"]
+            lines.append(f"  说明: {r.get('message', '')}")
+            lines.append(f"  期初余额合计: {d.get('total_beginning', 0)}")
+            lines.append(f"  期末余额合计: {d.get('total_ending', 0)}")
+            lines.append(f"  发生额合计: {d.get('total_occurrence', 0)}")
+            lines.append(f"  发生额归零检查: {'✅ 通过' if d.get('balance_check_passed') else '❌ 异常'}")
+            return {"result": "\n".join(lines)}
+
+        elif tool_name == 'cross_validate':
+            r = checker.test_cross_validation()
+            d = r.get('details', {})
+            if r.get('status') == 'error':
+                return {"result": f"❌ 交叉验证执行失败: {r.get('message', '')}"}
+            if r.get('status') == 'skipped':
+                return {"result": "⏭ 交叉验证已跳过（缺少科目余额表数据）"}
+            passed = r.get('passed', False)
+            lines = [f"{'✅' if passed else '❌'} 交叉验证: {'通过' if passed else '未通过'}"]
+            lines.append(f"  说明: {r.get('message', '')}")
+            lines.append(f"  汇总科目数: {d.get('total_accounts', 0)}")
+            lines.append(f"  差异数量: {d.get('difference_count', 0)}")
+            lines.append(f"  仅有序时账: {d.get('only_in_journal', 0)}")
+            lines.append(f"  仅有余额表: {d.get('only_in_balance', 0)}")
+            if d.get('diff_records'):
+                lines.append("  差异明细（前5条）：")
+                for rec in d['diff_records'][:5]:
+                    lines.append(f"    公司{rec.get('公司名','')} 科目{rec.get('科目编号','')} {rec.get('科目名称','')} 序时账{rec.get('序时账发生额',0)} 余额表{rec.get('余额表发生额',0)} 差异{rec.get('差异',0)}")
+            return {"result": "\n".join(lines)}
+
+        elif tool_name == 'run_all_tests':
+            direction_adj = arguments.get('direction_adjustment', False)
+            reverse_cf = arguments.get('reverse_carry_forward', False)
+            cf_account_code = arguments.get('cf_account_code') or None
+            cf_keywords = arguments.get('cf_keywords') or None
+            leaf = arguments.get('leaf_accounts', False)
+            exclude_empty = arguments.get('exclude_empty_voucher', False)
+            exclude_total = arguments.get('exclude_balance_total', False)
+
+            orig_jt = checker.journal_table
+            orig_bt = checker.balance_table
+            conn = checker.engine._conn
+            config_items = []
+
+            # 1) TRIM
+            checker._setup_trim_views()
+            config_items.append("✓ 文本去空格")
+
+            # 2) 方向调整（按参数）
+            if direction_adj:
+                checker._setup_direction_views()
+                config_items.append("✓ 借正贷负方向调整")
+            else:
+                config_items.append("○ 跳过方向调整")
+
+            # 3) 自定义剔除规则
+            if exclude_empty and table_name:
+                conn.execute(f'''
+                    CREATE OR REPLACE TEMP VIEW _chat_ex_j AS
+                    SELECT * FROM "{checker.journal_table}"
+                    WHERE "凭证号" IS NOT NULL AND CAST("凭证号" AS VARCHAR) != ''
+                ''')
+                checker.journal_table = '_chat_ex_j'
+                config_items.append("✓ 剔除凭证号为空")
+            if exclude_total and balance_table:
+                conn.execute(f'''
+                    CREATE OR REPLACE TEMP VIEW _chat_ex_b AS
+                    SELECT * FROM "{checker.balance_table}"
+                    WHERE (CAST("科目编号" AS VARCHAR) NOT LIKE '%合计%')
+                      AND (CAST("科目名称" AS VARCHAR) NOT LIKE '%合计%')
+                ''')
+                checker.balance_table = '_chat_ex_b'
+                config_items.append("✓ 剔除合计行")
+
+            # 4) 末级科目
+            if leaf and balance_table:
+                try:
+                    checker._setup_leaf_account_views()
+                    checker.balance_table = 'balance_leaf'
+                    config_items.append("✓ 末级科目筛选")
+                except Exception as e:
+                    config_items.append(f"⚠ 末级科目筛选失败: {e}")
+
+            # 5) 反结转（自定义科目号/关键词）
+            if reverse_cf and table_name:
+                try:
+                    jt = checker.journal_table
+                    bt = checker.balance_table
+                    j_cols = {c['name'] for c in (engine.get_schema(jt) or [])}
+                    cf_conds = []
+                    if '科目编号' in j_cols:
+                        code = cf_account_code or '4103'
+                        cf_conds.append(f'CAST("科目编号" AS VARCHAR) = \'{code}\'')
+                    kw_list = cf_keywords or ['结转', '损益']
+                    if '摘要' in j_cols and kw_list:
+                        kw_cond = ' AND '.join(f'"摘要" LIKE \'%{kw}%\''
+                                                for kw in kw_list)
+                        cf_conds.append(f'({kw_cond})')
+                    if cf_conds:
+                        w = ' OR '.join(cf_conds)
+                        conn.execute(f'''
+                            CREATE OR REPLACE TEMP VIEW _chat_cf_v AS
+                            SELECT DISTINCT "公司名","日期","凭证号" FROM "{jt}" WHERE {w}
+                        ''')
+                        # cf_amounts（按方向处理金额）
+                        if '方向' in j_cols:
+                            conn.execute(f'''
+                                CREATE OR REPLACE TEMP VIEW _chat_cf_a AS
+                                SELECT d."公司名",CAST(d."科目编号" AS VARCHAR)"科目编号",d."科目名称",
+                                  SUM(CASE WHEN d."方向" IN ('借','Debit','D') THEN CAST(d."金额" AS DOUBLE) ELSE -CAST(d."金额" AS DOUBLE) END)"结转损益金额"
+                                FROM "{jt}" d JOIN _chat_cf_v v ON d."公司名"=v."公司名" AND d."日期"=v."日期" AND d."凭证号"=v."凭证号"
+                                GROUP BY d."公司名",d."科目编号",d."科目名称"
+                            ''')
+                        else:
+                            conn.execute(f'''
+                                CREATE OR REPLACE TEMP VIEW _chat_cf_a AS
+                                SELECT d."公司名",CAST(d."科目编号" AS VARCHAR)"科目编号",d."科目名称",
+                                  SUM(CAST(d."金额" AS DOUBLE))"结转损益金额"
+                                FROM "{jt}" d JOIN _chat_cf_v v ON d."公司名"=v."公司名" AND d."日期"=v."日期" AND d."凭证号"=v."凭证号"
+                                GROUP BY d."公司名",d."科目编号",d."科目名称"
+                            ''')
+                        conn.execute(f'''
+                            CREATE OR REPLACE TEMP VIEW _chat_j_filt AS
+                            SELECT d.* FROM "{jt}" d
+                            LEFT JOIN _chat_cf_v v ON d."公司名"=v."公司名" AND d."日期"=v."日期" AND d."凭证号"=v."凭证号"
+                            WHERE v."公司名" IS NULL
+                        ''')
+                        checker.journal_table = '_chat_j_filt'
+                        if bt and engine.table_exists(bt):
+                            b_cols = {c['name'] for c in (engine.get_schema(bt) or [])}
+                            if '期初余额' in b_cols and '期末余额' in b_cols:
+                                conn.execute(f'''
+                                    CREATE OR REPLACE TEMP VIEW _chat_b_adj AS
+                                    SELECT b."公司名",CAST(b."科目编号" AS VARCHAR)"科目编号",b."科目名称",
+                                      SUM(CAST(b."期初余额" AS DOUBLE))"期初余额",
+                                      SUM(CAST(b."期末余额" AS DOUBLE))-COALESCE(SUM(cf."结转损益金额"),0)"期末余额",
+                                      SUM(CAST(b."期末余额" AS DOUBLE))-COALESCE(SUM(cf."结转损益金额"),0)-SUM(CAST(b."期初余额" AS DOUBLE))"发生额"
+                                    FROM "{bt}" b
+                                    LEFT JOIN _chat_cf_a cf ON CAST(b."公司名" AS VARCHAR)=CAST(cf."公司名" AS VARCHAR) AND CAST(b."科目编号" AS VARCHAR)=CAST(cf."科目编号" AS VARCHAR)
+                                    GROUP BY b."公司名",b."科目编号",b."科目名称"
+                                ''')
+                                checker.balance_table = '_chat_b_adj'
+                        config_items.append(f"✓ 反结转（科目{cf_account_code or '4103'}）")
+                except Exception as e:
+                    config_items.append(f"⚠ 反结转失败: {e}")
+
+            # 6) 执行三项测试
+            try:
+                results = {
+                    'journal_test': checker.test_journal_integrity(),
+                    'balance_test': checker.test_balance_integrity(),
+                    'cross_test': checker.test_cross_validation(),
+                }
+            finally:
+                checker.journal_table = orig_jt
+                checker.balance_table = orig_bt
+                for _v in ['_chat_ex_j','_chat_ex_b','_chat_cf_v','_chat_cf_a','_chat_j_filt','_chat_b_adj']:
+                    try:
+                        conn.execute(f'DROP VIEW IF EXISTS "{_v}"')
+                    except Exception:
+                        pass
+                checker._drop_cf_views()
+                checker._drop_leaf_views()
+                checker._drop_direction_views()
+                checker._drop_trim_views()
+
+            total = 3
+            completed = sum(1 for r in results.values() if r['status'] == 'completed')
+            errors = sum(1 for r in results.values() if r['status'] == 'error')
+            skipped = sum(1 for r in results.values() if r['status'] == 'skipped')
+            all_passed = all(r.get('passed', False) for r in results.values() if r['status'] == 'completed')
+            r = {'success': True, 'summary': {'total': total, 'completed': completed, 'errors': errors, 'skipped': skipped},
+                 'results': results, 'all_passed': all_passed}
+            session['integrity_results'] = r
+
+            lines = ["=== 完整性测试结果 ==="]
+            lines.append(f"总{total}项 | ✅通过{completed} | ❌未通过{total-completed-errors-skipped} | ⏭跳过{skipped} | ❌错误{errors}")
+            for tk, tl in [('journal_test', '序时账'), ('balance_test', '科目余额表'), ('cross_test', '交叉验证')]:
+                t = results.get(tk, {})
+                st = t.get('status', '')
+                if st == 'completed':
+                    lines.append(f"  {tl}: {'✅' if t.get('passed') else '❌'} {t.get('message','')}")
+                elif st == 'skipped':
+                    lines.append(f"  {tl}: ⏭ 跳过")
+                elif st == 'error':
+                    lines.append(f"  {tl}: ❌ {t.get('message','')}")
+            if all_passed:
+                lines.append("\n🎉 全部测试通过！")
+            lines.append("\n--- 本次测试配置 ---")
+            lines.extend(config_items)
+            return {"result": "\n".join(lines)}
+
+        elif tool_name == 'get_cf_info':
+            r = checker.get_cf_info()
+            if r.get('error'):
+                return {"result": f"结转损益信息获取失败: {r['error']}"}
+            lines = ["=== 结转损益金额详情 ==="]
+            lines.append(f"  公司: {r.get('company', '')}")
+            lines.append(f"  科目编号: {r.get('account_code', '')}")
+            lines.append(f"  科目名称: {r.get('account_name', '')}")
+            lines.append(f"  结转金额: {r.get('total_amount', 0)}")
+            lines.append(f"  匹配类型: {r.get('match_type', '')}")
+            return {"result": "\n".join(lines)}
+
+        elif tool_name == 'get_leaf_info':
+            r = checker.get_leaf_info()
+            if r.get('error'):
+                return {"result": f"末级科目信息获取失败: {r['error']}"}
+            lines = ["=== 末级科目筛选信息 ==="]
+            lines.append(f"  末级科目数: {r.get('leaf_count', 0)}")
+            lines.append(f"  非末级科目数: {r.get('non_leaf_count', 0)}")
+            return {"result": "\n".join(lines)}
+
+        elif tool_name == 'export_report':
+            report = checker.export_report(
+                reverse_carry_forward=arguments.get('reverse_carry_forward', False),
+                leaf_accounts=arguments.get('leaf_accounts', False))
+            import io, pandas as pd, base64
+            output = io.BytesIO()
+            sheet_keys = ['journal', 'balance', 'cross_validation']
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                for key in sheet_keys:
+                    df = report.get(key)
+                    if df is not None and hasattr(df, 'empty') and not df.empty:
+                        df.to_excel(writer, sheet_name=key[:31], index=False)
+            output.seek(0)
+            b64 = base64.b64encode(output.getvalue()).decode()
+            return {"result": "报告已生成（含序时账、科目余额表、交叉验证三个Sheet），请使用下方下载按钮获取", "file": b64, "filename": "integrity_report.xlsx"}
+
+    except Exception as e:
+        return {"error": f"工具执行异常: {str(e)}"}
+
+
+@app.route('/api/integrity-chat', methods=['POST'])
+def integrity_chat():
+    """多轮对话：完整性测试助手"""
+    data = request.get_json(silent=True) or {}
+    message = data.get('message', '').strip()
+    if not message:
+        return jsonify({'success': False, 'error': '消息不能为空'})
+
+    api_key = session.get('api_key')
+    if not api_key:
+        return jsonify({'success': False, 'error': '请先在"API配置"步骤配置 API Key'})
+
+    try:
+        provider = session.get('ai_provider', 'deepseek')
+        model = session.get('ai_model')
+        plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
+        provider_config = Config.AI_PROVIDERS.get(provider, Config.AI_PROVIDERS["deepseek"])
+        api_url = provider_config["api_url"]
+        model_name = model or provider_config["model"]
+
+        history = session.get('integrity_chat_history', [])
+        messages = [{"role": "system", "content": INTEGRITY_SYSTEM_PROMPT}]
+        messages.extend(history)
+        messages.append({"role": "user", "content": message})
+
+        import requests as http_req
+
+        def call_ai(msgs, max_rounds=5):
+            file_data = None
+            file_name = None
+            for _ in range(max_rounds):
+                resp = http_req.post(api_url, headers={
+                    "Authorization": f"Bearer {plain_key}",
+                    "Content-Type": "application/json"
+                }, json={
+                    "model": model_name,
+                    "messages": msgs,
+                    "tools": INTEGRITY_TOOLS,
+                    "temperature": 0.3,
+                    "max_tokens": 2000,
+                }, timeout=60)
+
+                if resp.status_code != 200:
+                    raise Exception(f"API请求失败: {resp.status_code}")
+
+                result = resp.json()
+                choice = result['choices'][0]
+                msg = choice['message']
+
+                if not msg.get('tool_calls'):
+                    return msg.get('content', ''), file_data, file_name
+
+                msgs.append({"role": "assistant", "content": msg.get('content') or None, "tool_calls": msg['tool_calls']})
+
+                for tc in msg['tool_calls']:
+                    fn = tc['function']
+                    tool_result = _execute_integrity_tool(fn['name'], json_module.loads(fn.get('arguments', '{}')))
+                    if isinstance(tool_result, dict) and 'file' in tool_result:
+                        file_data = tool_result['file']
+                        file_name = tool_result.get('filename', 'integrity_report.xlsx')
+                    msgs.append({
+                        "role": "tool",
+                        "tool_call_id": tc['id'],
+                        "content": json_module.dumps(tool_result, ensure_ascii=False)
+                    })
+
+            return "抱歉，对话处理超过最大轮次，请重试。", file_data, file_name
+
+        reply, file_data, file_name = call_ai(messages)
+
+        # 兜底：用户要求导出但 AI 没调 export_report 工具时，后端强制导出
+        if not file_data:
+            export_keywords = ['导出', '报告', '下载']
+            if any(kw in message for kw in export_keywords):
+                try:
+                    tool_result = _execute_integrity_tool('export_report', {})
+                    if isinstance(tool_result, dict) and 'file' in tool_result:
+                        file_data = tool_result['file']
+                        file_name = tool_result.get('filename', 'integrity_report.xlsx')
+                except Exception:
+                    pass
+
+        # export_report 被调用（或强制导出）后，用固定消息避免 AI 幻觉
+        if file_data:
+            reply = "✅ 完整性测试报告已生成，请点击下方下载按钮获取。"
+
+        trimmed_history = history + [
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": reply}
+        ]
+        if len(trimmed_history) > 20:
+            trimmed_history = trimmed_history[-20:]
+        session['integrity_chat_history'] = trimmed_history
+
+        result_data = {'success': True, 'response': reply}
+        if file_data:
+            result_data['file_data'] = file_data
+            result_data['file_name'] = file_name
+        return jsonify(result_data)
+
+    except Exception as e:
+        import traceback
+        app.logger.error(f"[INTEGRITY-CHAT] {str(e)}\n{traceback.format_exc()}")
+        return jsonify({'success': False, 'error': f'对话处理失败: {str(e)}'})
+
+
 @app.route('/api/integrity-test/ai-analyze', methods=['POST'])
 def ai_analyze_integrity():
     """AI 分析完整性测试异常结果 — 从审计视角分析原因并给出建议"""
@@ -684,37 +1287,44 @@ def configure_fields():
     if balance_field_mapping:
         session['balance_field_mapping'] = balance_field_mapping
 
-        # 同样更新 balance_data_info
-        balance_info = session.get('balance_data_info', {})
-        if balance_info:
-            rev_balance = {v: k for k, v in balance_field_mapping.items()}
-            mapped_fields = []
-            for field in balance_info.get('fields', []):
-                fname = field.get('name', '')
-                if fname in rev_balance:
-                    mf = field.copy()
-                    mf['name'] = rev_balance[fname]
-                    mf['original_name'] = fname
-                    mapped_fields.append(mf)
-                else:
-                    mapped_fields.append(field.copy())
-            balance_info['mapped_fields'] = mapped_fields
+    # 存储科目余额表格式
+    balance_format = data.get('balance_format', 'calculated')
+    session['balance_format'] = balance_format
+    app.logger.info(f"[CONFIGURE_FIELDS] balance_format: {balance_format}")
 
-            bpreview = balance_info.get('preview', [])
-            if bpreview:
-                mapped_preview = []
-                for row in bpreview:
-                    mrow = {}
-                    for key, value in row.items():
-                        mrow[rev_balance.get(key, key)] = value
-                    mapped_preview.append(mrow)
-                balance_info['mapped_preview'] = mapped_preview
+    # 同样更新 balance_data_info
+    balance_info = session.get('balance_data_info', {})
+    if balance_info:
+        rev_balance = {v: k for k, v in balance_field_mapping.items()}
+        mapped_fields = []
+        for field in balance_info.get('fields', []):
+            fname = field.get('name', '')
+            if fname in rev_balance:
+                mf = field.copy()
+                mf['name'] = rev_balance[fname]
+                mf['original_name'] = fname
+                mapped_fields.append(mf)
+            else:
+                mapped_fields.append(field.copy())
+        balance_info['mapped_fields'] = mapped_fields
 
-            session['balance_data_info'] = balance_info
+        bpreview = balance_info.get('preview', [])
+        if bpreview:
+            mapped_preview = []
+            for row in bpreview:
+                mrow = {}
+                for key, value in row.items():
+                    mrow[rev_balance.get(key, key)] = value
+                mapped_preview.append(mrow)
+            balance_info['mapped_preview'] = mapped_preview
+
+        session['balance_data_info'] = balance_info
 
     has_balance = bool(session.get('balance_data_info'))
 
     # ---- 导入数据到 DuckDB ----
+    # 重新导入数据时清除旧对话历史
+    session.pop('integrity_chat_history', None)
     import_success = False
     try:
         engine = get_duckdb_engine()
@@ -740,6 +1350,23 @@ def configure_fields():
             if rows == 0:
                 app.logger.warning(f"[DUCKDB] 序时账导入后行数为 0，请检查源文件")
             import_success = True
+
+            # 如果序时账有借方和贷方但没有金额字段，自动计算金额 = 借方 - 贷方
+            try:
+                j_cols = {c['name'] for c in engine.get_schema('data')}
+                has_debit = '借方' in j_cols
+                has_credit = '贷方' in j_cols
+                has_amount = '金额' in j_cols
+                if has_debit and has_credit and not has_amount:
+                    engine._conn.execute('''
+                        ALTER TABLE "data" ADD COLUMN "金额" DOUBLE
+                    ''')
+                    engine._conn.execute('''
+                        UPDATE "data" SET "金额" = COALESCE(TRY_CAST("借方" AS DOUBLE),0) - COALESCE(TRY_CAST("贷方" AS DOUBLE),0)
+                    ''')
+                    app.logger.info("[DUCKDB] 已从借贷方自动计算序时账金额")
+            except Exception as e:
+                app.logger.warning(f"[DUCKDB] 序时账金额计算失败: {e}")
         else:
             app.logger.warning(f"[DUCKDB] 跳过序时账导入: filepath={filepath}, field_mapping={'有' if field_mapping else '无'}")
 
@@ -761,6 +1388,33 @@ def configure_fields():
                                    sheet_name=balance_sheet_name, header_row=balance_header_row,
                                    constant_columns=balance_constant_cols)
             app.logger.info(f"[DUCKDB] 科目余额表已导入: {balance_filepath}")
+
+            # 如果余额表格式为借贷方，自动计算期初余额和期末余额
+            if session.get('balance_format') == 'debit_credit':
+                try:
+                    b_cols = {c['name'] for c in engine.get_schema('balance_data')}
+                    has_beg_dr = '期初借方' in b_cols
+                    has_beg_cr = '期初贷方' in b_cols
+                    has_end_dr = '期末借方' in b_cols
+                    has_end_cr = '期末贷方' in b_cols
+                    if has_beg_dr and has_beg_cr:
+                        engine._conn.execute('''
+                            ALTER TABLE "balance_data" ADD COLUMN "期初余额" DOUBLE
+                        ''')
+                        engine._conn.execute('''
+                            UPDATE "balance_data" SET "期初余额" = COALESCE(TRY_CAST("期初借方" AS DOUBLE),0) - COALESCE(TRY_CAST("期初贷方" AS DOUBLE),0)
+                        ''')
+                        app.logger.info("[DUCKDB] 已从借贷方计算期初余额")
+                    if has_end_dr and has_end_cr:
+                        engine._conn.execute('''
+                            ALTER TABLE "balance_data" ADD COLUMN "期末余额" DOUBLE
+                        ''')
+                        engine._conn.execute('''
+                            UPDATE "balance_data" SET "期末余额" = COALESCE(TRY_CAST("期末借方" AS DOUBLE),0) - COALESCE(TRY_CAST("期末贷方" AS DOUBLE),0)
+                        ''')
+                        app.logger.info("[DUCKDB] 已从借贷方计算期末余额")
+                except Exception as e:
+                    app.logger.warning(f"[DUCKDB] 借贷方计算余额失败: {e}")
     except Exception as e:
         app.logger.error(f"[DUCKDB IMPORT ERROR] {str(e)}")
         # DuckDB 导入失败时清理残留的 .db 文件
@@ -817,7 +1471,7 @@ def auto_map_fields():
     balance_fields = data.get('balance_fields', [])
     balance_standard = data.get('balance_standard_fields', [])
 
-    if not journal_fields or not journal_standard:
+    if (not journal_fields or not journal_standard) and (not balance_fields or not balance_standard):
         return jsonify({'success': False, 'error': '字段信息不完整'})
 
     try:
@@ -832,30 +1486,39 @@ def auto_map_fields():
         lines = [
             "你是一个数据工程师，负责将用户上传的Excel列映射到标准字段。",
             "根据列名、数据类型和样本值推断每列的含义，映射到最合适的标准字段。",
-            "",
-            "## 用户序时账列",
         ]
-        for f in journal_fields:
-            lines.append(f"- {f['name']} (类型: {f['type']}, 样本: {f.get('sample', 'N/A')})")
 
-        lines.extend(["", "## 标准字段（序时账）"])
-        for f in journal_standard:
-            lines.append(f"- {f['id']}: {f['name']} — {f['description']} (类型: {f['type']})")
+        has_j = bool(journal_fields and journal_standard)
+        has_b = bool(balance_fields and balance_standard)
 
-        if balance_fields and balance_standard:
+        if has_j:
+            lines.extend([
+                "",
+                "## 用户序时账列",
+            ])
+            for f in journal_fields:
+                lines.append(f"- {f['name']} (类型: {f['type']}, 样本: {f.get('sample', 'N/A')})")
+            lines.extend(["", "## 标准字段（序时账）"])
+            for f in journal_standard:
+                lines.append(f"- {f['id']}: {f['name']} — {f['description']} (类型: {f['type']})")
+
+        if has_b:
             lines.extend(["", "## 用户科目余额表列"])
             for f in balance_fields:
                 lines.append(f"- {f['name']} (类型: {f['type']}, 样本: {f.get('sample', 'N/A')})")
-
             lines.extend(["", "## 标准字段（科目余额表）"])
             for f in balance_standard:
                 lines.append(f"- {f['id']}: {f['name']} — {f['description']} (类型: {f['type']})")
 
+        return_format = []
+        if has_j:
+            return_format.append('"journal_mapping": { "date": "用户列名", ... }')
+        if has_b:
+            return_format.append('"balance_mapping": { "期初余额": "用户列名", ... }')
         lines.extend([
             "",
-            "返回纯 JSON，不要 Markdown 包裹。格式：",
-            '{ "journal_mapping": { "date": "用户列名", ... }, "balance_mapping": { ... } }',
-            "映射不确认的字段就省略，balance_mapping 无数据时返回 {}。",
+            f'返回纯 JSON，不要 Markdown 包裹。格式：{{ {", ".join(return_format)} }}',
+            "映射不确认的字段就省略。",
         ])
         prompt = "\n".join(lines)
 
@@ -982,7 +1645,8 @@ def query_page():
 
     # 传递数据信息到模板
     data_info = session.get('data_info', {})
-    return render_template('query.html', data_info=data_info)
+    has_review_config = bool(session.get('review_api_key'))
+    return render_template('query.html', data_info=data_info, has_review_config=has_review_config)
 
 # 注释掉results页面，因为查询页面已经包含完整的结果展示功能
 # @app.route('/results', methods=['GET'])
@@ -1406,6 +2070,176 @@ def query_history():
     """API: 返回当前会话的查询历史"""
     history = session.get('query_history', [])
     return jsonify({'success': True, 'history': history})
+
+@app.route('/api/saved-queries', methods=['GET', 'POST'])
+def saved_queries():
+    """API: 收藏查询的列表/保存"""
+    if request.method == 'GET':
+        saved = session.get('saved_queries', [])
+        summary = []
+        for q in saved:
+            summary.append({
+                'id': q['id'],
+                'name': q['name'],
+                'query': q['query'],
+                'timestamp': q['timestamp'],
+                'row_count': q.get('row_count'),
+            })
+        return jsonify({'success': True, 'queries': summary})
+
+    # POST - 保存
+    data = request.json
+    name = data.get('name', '未命名查询')
+    query = data.get('query', '')
+    sql = data.get('sql', '')
+    result_data = data.get('result_data')
+
+    if not query:
+        return jsonify({'success': False, 'error': '查询语句不能为空'})
+
+    import uuid
+    qid = str(uuid.uuid4())[:8]
+
+    row_count = None
+    if result_data:
+        rd = result_data.get('result', result_data)
+        if rd.get('type') == 'dataframe':
+            row_count = len(rd.get('data', []))
+
+    saved = session.get('saved_queries', [])
+
+    result_file = None
+    if result_data:
+        try:
+            result_filename = f"saved_{qid}_{int(time.time())}.json"
+            result_filepath = os.path.join(app.config['UPLOAD_FOLDER'], result_filename)
+            with open(result_filepath, 'w', encoding='utf-8') as f:
+                json_module.dump(_json_safe(result_data), f, ensure_ascii=False)
+            result_file = result_filename
+        except Exception as e:
+            app.logger.warning(f"[SAVED_QUERY] 保存结果文件失败: {e}")
+
+    entry = {
+        'id': qid,
+        'name': name,
+        'query': query,
+        'sql': sql,
+        'timestamp': time.strftime('%Y-%m-%d %H:%M'),
+        'row_count': row_count,
+        'result_file': result_file,
+    }
+    saved.append(entry)
+    session['saved_queries'] = saved
+    return jsonify({'success': True, 'id': qid})
+
+
+@app.route('/api/saved-queries/<qid>', methods=['DELETE'])
+def delete_saved_query(qid):
+    """API: 删除收藏查询"""
+    saved = session.get('saved_queries', [])
+    for i, q in enumerate(saved):
+        if q['id'] == qid:
+            if q.get('result_file'):
+                fpath = os.path.join(app.config['UPLOAD_FOLDER'], q['result_file'])
+                if os.path.exists(fpath):
+                    try:
+                        os.remove(fpath)
+                    except Exception:
+                        pass
+            saved.pop(i)
+            session['saved_queries'] = saved
+            return jsonify({'success': True})
+    return jsonify({'success': False, 'error': '未找到该收藏查询'})
+
+
+@app.route('/api/export-saved-queries', methods=['POST'])
+def export_saved_queries():
+    """API: 批量导出收藏查询为多 Sheet Excel"""
+    data = request.json
+    ids = data.get('ids', [])
+    if not ids:
+        return jsonify({'success': False, 'error': '请选择要导出的查询'})
+
+    saved = session.get('saved_queries', [])
+    selected = [q for q in saved if q['id'] in ids]
+    if not selected:
+        return jsonify({'success': False, 'error': '未找到选中的查询'})
+
+    try:
+        import pandas as pd
+        import openpyxl
+        from openpyxl.styles import Font, Alignment, PatternFill
+
+        filename = f'export_saved_{int(time.time())}.xlsx'
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+
+        with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
+            for idx, sq in enumerate(selected):
+                sheet_name = sq.get('name', f'查询{idx+1}')[:31]
+
+                result_data = None
+                if sq.get('result_file'):
+                    rfpath = os.path.join(app.config['UPLOAD_FOLDER'], sq['result_file'])
+                    if os.path.exists(rfpath):
+                        try:
+                            with open(rfpath, 'r', encoding='utf-8') as f:
+                                result_data = json_module.load(f)
+                        except Exception:
+                            pass
+
+                if not result_data:
+                    info_df = pd.DataFrame([
+                        {'项目': '查询名称', '内容': sq.get('name', '')},
+                        {'项目': '自然语言查询', '内容': sq.get('query', '')},
+                        {'项目': 'SQL代码', '内容': sq.get('sql', '')},
+                        {'项目': '备注', '内容': '结果数据不可用'},
+                    ])
+                    info_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                    continue
+
+                rd = result_data.get('result', result_data)
+                columns = rd.get('columns', [])
+                rows = rd.get('data', [])
+
+                info_rows = [
+                    {'信息': '查询名称', '内容': sq.get('name', '')},
+                    {'信息': '自然语言查询', '内容': sq.get('query', '')},
+                    {'信息': 'SQL代码', '内容': sq.get('sql', '')},
+                    {'信息': '记录数', '内容': len(rows)},
+                ]
+                info_df = pd.DataFrame(info_rows)
+                info_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                ws = writer.sheets[sheet_name]
+                header_font = Font(bold=True, color='FFFFFF', size=11)
+                header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+                for cell in ws[1]:
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                ws.column_dimensions['A'].width = 16
+                ws.column_dimensions['B'].width = 80
+
+                if rows and columns:
+                    start_row = 7
+                    for ci, col_name in enumerate(columns, 1):
+                        cell = ws.cell(row=start_row, column=ci, value=col_name)
+                        cell.font = Font(bold=True)
+                        cell.fill = PatternFill(start_color='D9E2F3', end_color='D9E2F3', fill_type='solid')
+                    for ri, row in enumerate(rows, start_row + 1):
+                        for ci, col_name in enumerate(columns, 1):
+                            val = row.get(col_name, '')
+                            if val is None:
+                                val = ''
+                            ws.cell(row=ri, column=ci, value=val)
+
+        return send_file(filepath, as_attachment=True, download_name=filename)
+
+    except Exception as e:
+        app.logger.error(f"[EXPORT SAVED] 批量导出失败: {e}")
+        return jsonify({'success': False, 'error': f'导出失败: {str(e)}'})
+
+
+
 
 
 @app.route('/api/optimize-query', methods=['POST'])

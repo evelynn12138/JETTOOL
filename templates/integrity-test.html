@@ -358,9 +358,6 @@
             const aiBtn = document.getElementById('ai-analyze-btn');
             if (aiBtn) aiBtn.addEventListener('click', aiAnalyzeIntegrity);
 
-            // 异步刷新直接查询的结转损益金额
-            refreshDirectCfAmount();
-
             // 滚动到结果区域
             container.scrollIntoView({ behavior: 'smooth' });
         }
@@ -583,48 +580,7 @@
             return html;
         }
 
-        // 通过直接查询获取结转损益金额（仅 4103/结转+损益 的匹配行，不含整张凭证的其他行）
-        async function refreshDirectCfAmount() {
-            const sqlWithDir = 'SELECT COALESCE(SUM(CASE WHEN "方向" IN (\'借\', \'Debit\', \'D\') THEN CAST("金额" AS DOUBLE) ELSE -CAST("金额" AS DOUBLE) END), 0) AS amount FROM "data" WHERE CAST("科目编号" AS VARCHAR) = \'4103\' OR ("摘要" LIKE \'%结转%\' AND "摘要" LIKE \'%损益%\')';
-            const sqlSimple = 'SELECT COALESCE(SUM(CAST("金额" AS DOUBLE)), 0) AS amount FROM "data" WHERE CAST("科目编号" AS VARCHAR) = \'4103\' OR ("摘要" LIKE \'%结转%\' AND "摘要" LIKE \'%损益%\')';
-            try {
-                const resp = await fetch('/api/execute', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ code: sqlWithDir })
-                });
-                const result = await resp.json();
-                if (result.success && result.result) {
-                    const val = result.result.type === 'scalar' ? result.result.value
-                        : (result.result.data && result.result.data.length > 0 ? result.result.data[0].amount : null);
-                    if (val != null) {
-                        const el = document.getElementById('cf-total-amount');
-                        if (el) el.textContent = '¥' + formatNum(val);
-                        return;
-                    }
-                }
-            } catch (e) {}
-            try {
-                const resp = await fetch('/api/execute', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ code: sqlSimple })
-                });
-                const result = await resp.json();
-                if (result.success && result.result) {
-                    const val = result.result.type === 'scalar' ? result.result.value
-                        : (result.result.data && result.result.data.length > 0 ? result.result.data[0].amount : null);
-                    if (val != null) {
-                        const el = document.getElementById('cf-total-amount');
-                        if (el) el.textContent = '¥' + formatNum(val);
-                    }
-                }
-            } catch (e) {
-                console.error('直接查询结转损益金额失败:', e);
-            }
-        }
-
-        // ===== AI 差异分析 =====
+        // 结转损益金额由 IntegrityChecker 在 carry_forward_info.cf_total_amount 中返回
         async function aiAnalyzeIntegrity() {
             const btn = document.getElementById('ai-analyze-btn');
             const container = document.getElementById('ai-analysis-container');
@@ -784,7 +740,8 @@
 
         // 自动运行测试
         document.addEventListener('DOMContentLoaded', () => {
-            // 页面加载后自动询问是否运行
+            // 页面加载后自动打招呼，引导用户进行完整性测试
+            setTimeout(() => sendChatMessage('你好，请开始引导'), 300);
         });
     </script>
 
@@ -1251,6 +1208,380 @@
         .ai-analysis-section li:last-child {
             margin-bottom: 0;
         }
+
+        /* ====== 完整性测试对话面板 ====== */
+        .chat-toggle {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: var(--black);
+            color: var(--yellow);
+            border: none;
+            cursor: pointer;
+            font-size: 24px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+            z-index: 999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s;
+        }
+        .chat-toggle:hover {
+            transform: scale(1.1);
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+        }
+        .chat-toggle.open {
+            background: var(--yellow);
+            color: var(--black);
+        }
+        .chat-panel {
+            position: fixed;
+            bottom: 90px;
+            right: 24px;
+            width: 420px;
+            height: 560px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            z-index: 998;
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+        }
+        .chat-panel.open {
+            display: flex;
+        }
+        .chat-header {
+            background: var(--black);
+            color: white;
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+        .chat-header-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 15px;
+            font-weight: 600;
+        }
+        .chat-header-title i {
+            color: var(--yellow);
+        }
+        .chat-header-close {
+            background: none;
+            border: none;
+            color: rgba(255,255,255,0.6);
+            cursor: pointer;
+            font-size: 18px;
+            padding: 4px;
+        }
+        .chat-header-close:hover {
+            color: white;
+        }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            background: #f9fafb;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .chat-msg {
+            max-width: 85%;
+            padding: 10px 14px;
+            border-radius: 10px;
+            font-size: 14px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .chat-msg.user {
+            background: var(--black);
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+        }
+        .chat-msg.ai {
+            background: white;
+            color: var(--black);
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        }
+        .chat-msg.ai em {
+            font-style: normal;
+            color: var(--secondary-color);
+        }
+        .chat-msg .msg-label {
+            font-size: 11px;
+            font-weight: 600;
+            margin-bottom: 4px;
+            opacity: 0.6;
+        }
+        .chat-loading {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            align-self: flex-start;
+            color: var(--secondary-color);
+            font-size: 13px;
+        }
+        .chat-loading .spinner-small {
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border-color);
+            border-top: 2px solid var(--yellow);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        .chat-input-area {
+            display: flex;
+            gap: 8px;
+            padding: 12px 16px;
+            border-top: 1px solid var(--border-color);
+            background: white;
+            flex-shrink: 0;
+        }
+        .chat-input-area input {
+            flex: 1;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .chat-input-area input:focus {
+            border-color: var(--yellow);
+        }
+        .chat-input-area button {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            border: none;
+            background: var(--black);
+            color: var(--yellow);
+            cursor: pointer;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+        .chat-input-area button:hover {
+            background: var(--yellow);
+            color: var(--black);
+        }
+        .chat-input-area button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .chat-welcome {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--secondary-color);
+        }
+        .chat-welcome i {
+            font-size: 40px;
+            color: var(--yellow);
+            margin-bottom: 12px;
+        }
+        .chat-welcome h4 {
+            font-size: 16px;
+            margin-bottom: 8px;
+            color: var(--black);
+        }
+        .chat-welcome p {
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .chat-welcome .suggestions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+            margin-top: 16px;
+        }
+        .chat-welcome .suggestions button {
+            background: rgba(255, 231, 0, 0.15);
+            border: 1px solid var(--yellow);
+            border-radius: 20px;
+            padding: 6px 14px;
+            font-size: 12px;
+            cursor: pointer;
+            color: var(--black);
+            transition: all 0.2s;
+        }
+        .chat-welcome .suggestions button:hover {
+            background: var(--yellow);
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
+
+    <!-- ====== 完整性测试对话面板 ====== -->
+    <button class="chat-toggle" id="chatToggle" title="完整性测试助手">
+        <i class="fas fa-robot"></i>
+    </button>
+
+    <div class="chat-panel" id="chatPanel">
+        <div class="chat-header">
+            <div class="chat-header-title">
+                <i class="fas fa-clipboard-check"></i>
+                完整性测试助手
+            </div>
+            <button class="chat-header-close" id="chatClose"><i class="fas fa-times"></i></button>
+        </div>
+
+        <div class="chat-messages" id="chatMessages">
+            <div class="chat-welcome" id="chatWelcome">
+                <i class="fas fa-robot"></i>
+                <h4>你好，我是完整性测试助手</h4>
+                <p>我可以帮你运行完整性测试、分析结果、<br>处理反结转和末级科目等操作。</p>
+                <div class="suggestions">
+                    <button onclick="sendChatMessage('运行全部完整性测试')">运行全部测试</button>
+                    <button onclick="sendChatMessage('只跑借贷平衡')">只跑借贷平衡</button>
+                    <button onclick="sendChatMessage('分析测试结果')">分析测试结果</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="chat-input-area">
+            <input type="text" id="chatInput" placeholder="输入你的问题..." autocomplete="off">
+            <button id="chatSend"><i class="fas fa-paper-plane"></i></button>
+        </div>
+    </div>
+
+    <script>
+        // ====== 完整性测试对话 ======
+        const chatToggle = document.getElementById('chatToggle');
+        const chatPanel = document.getElementById('chatPanel');
+        const chatClose = document.getElementById('chatClose');
+        const chatMessages = document.getElementById('chatMessages');
+        const chatInput = document.getElementById('chatInput');
+        const chatSend = document.getElementById('chatSend');
+        const chatWelcome = document.getElementById('chatWelcome');
+
+        let isSending = false;
+
+        function openChat() {
+            chatPanel.classList.add('open');
+            chatToggle.classList.add('open');
+            chatToggle.innerHTML = '<i class="fas fa-times"></i>';
+        }
+
+        function closeChat() {
+            chatPanel.classList.remove('open');
+            chatToggle.classList.remove('open');
+            chatToggle.innerHTML = '<i class="fas fa-robot"></i>';
+        }
+
+        chatToggle.addEventListener('click', () => {
+            if (chatPanel.classList.contains('open')) {
+                closeChat();
+            } else {
+                openChat();
+            }
+        });
+
+        chatClose.addEventListener('click', closeChat);
+
+        function addChatMessage(text, role) {
+            chatWelcome.style.display = 'none';
+            const div = document.createElement('div');
+            div.className = 'chat-msg ' + role;
+            if (role === 'ai') {
+                div.innerHTML = '<div class="msg-label">完整性测试助手</div>' + escapeHtml(text);
+            } else {
+                div.innerHTML = escapeHtml(text);
+            }
+            chatMessages.appendChild(div);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return div;
+        }
+
+        function showChatLoading() {
+            chatWelcome.style.display = 'none';
+            const div = document.createElement('div');
+            div.className = 'chat-loading';
+            div.id = 'chatLoading';
+            div.innerHTML = '<div class="spinner-small"></div> 思考中...';
+            chatMessages.appendChild(div);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function hideChatLoading() {
+            const el = document.getElementById('chatLoading');
+            if (el) el.remove();
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        async function sendChatMessage(text) {
+            if (!text || isSending) return;
+
+            const msg = text.trim();
+            if (!msg) return;
+
+            addChatMessage(msg, 'user');
+            chatInput.value = '';
+            showChatLoading();
+            isSending = true;
+            chatSend.disabled = true;
+
+            try {
+                const resp = await fetch('/api/integrity-chat', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({message: msg})
+                });
+                const data = await resp.json();
+                hideChatLoading();
+                if (data.success) {
+                    const msgDiv = addChatMessage(data.response, 'ai');
+                    if (data.file_data) {
+                        const link = document.createElement('a');
+                        link.href = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,' + data.file_data;
+                        link.download = data.file_name || 'integrity_report.xlsx';
+                        link.className = 'btn btn-primary btn-small';
+                        link.style.cssText = 'margin-top:10px;text-decoration:none;color:var(--black);';
+                        link.innerHTML = '<i class="fas fa-download"></i> 下载报告';
+                        msgDiv.appendChild(link);
+                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                    }
+                } else {
+                    addChatMessage('❌ ' + (data.error || '请求失败'), 'ai');
+                }
+            } catch (e) {
+                hideChatLoading();
+                addChatMessage('❌ 网络错误，请重试', 'ai');
+            } finally {
+                isSending = false;
+                chatSend.disabled = false;
+            }
+        }
+
+        chatSend.addEventListener('click', () => sendChatMessage(chatInput.value));
+        chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') sendChatMessage(chatInput.value);
+        });
+    </script>
 </body>
 </html>
+        // ===== AI 差异分析 ======

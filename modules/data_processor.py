@@ -23,12 +23,19 @@ class DataProcessor:
 
     @staticmethod
     def get_xlsx_sheet_names(filepath: str) -> list:
-        """获取 xlsx 文件的所有 sheet 名称"""
-        from openpyxl import load_workbook
-        wb = load_workbook(filepath, read_only=True)
-        sheets = wb.sheetnames
-        wb.close()
-        return sheets
+        """获取 Excel 文件的所有 sheet 名称（支持 .xlsx 和 .xls）"""
+        ext = os.path.splitext(filepath)[1].lower()
+        if ext == '.xls':
+            import xlrd
+            wb = xlrd.open_workbook(filepath)
+            sheets = wb.sheet_names()
+            return sheets
+        else:
+            from openpyxl import load_workbook
+            wb = load_workbook(filepath, read_only=True)
+            sheets = wb.sheetnames
+            wb.close()
+            return sheets
 
     @staticmethod
     def preview_raw(filepath: str, nrows: int = 15) -> dict:
@@ -38,23 +45,39 @@ class DataProcessor:
         """
         ext = os.path.splitext(filepath)[1].lower()
         if ext in ['.xlsx', '.xls']:
-            from openpyxl import load_workbook
-            wb = load_workbook(filepath, read_only=True)
-            result = {}
-            for name in wb.sheetnames:
-                ws = wb[name]
-                rows = []
-                for i, row in enumerate(ws.iter_rows(values_only=True)):
-                    if i >= nrows:
-                        break
-                    rows.append([str(c) if c is not None else '' for c in row])
-                result[name] = {
-                    'rows': rows,
-                    'total_rows': ws.max_row,
-                    'total_cols': ws.max_column,
-                }
-            wb.close()
-            return result
+            if ext == '.xls':
+                import xlrd
+                wb = xlrd.open_workbook(filepath)
+                result = {}
+                for name in wb.sheet_names():
+                    ws = wb.sheet_by_name(name)
+                    rows = []
+                    for i in range(min(nrows, ws.nrows)):
+                        rows.append([str(ws.cell_value(i, c)) if ws.cell_type(i, c) != 0 else '' for c in range(ws.ncols)])
+                    result[name] = {
+                        'rows': rows,
+                        'total_rows': ws.nrows,
+                        'total_cols': ws.ncols,
+                    }
+                return result
+            else:
+                from openpyxl import load_workbook
+                wb = load_workbook(filepath, read_only=True)
+                result = {}
+                for name in wb.sheetnames:
+                    ws = wb[name]
+                    rows = []
+                    for i, row in enumerate(ws.iter_rows(values_only=True)):
+                        if i >= nrows:
+                            break
+                        rows.append([str(c) if c is not None else '' for c in row])
+                    result[name] = {
+                        'rows': rows,
+                        'total_rows': ws.max_row,
+                        'total_cols': ws.max_column,
+                    }
+                wb.close()
+                return result
         else:
             # CSV — 当作单个 sheet 处理
             import csv
@@ -106,16 +129,24 @@ class DataProcessor:
         """高效获取总行数（不加载全部数据）"""
         try:
             if self.file_type == 'excel':
-                from openpyxl import load_workbook
-                wb = load_workbook(self.filepath, read_only=True)
-                if sheet_name and sheet_name in wb.sheetnames:
-                    ws = wb[sheet_name]
-                else:
-                    ws = wb.active
-                offset = (header_row + 1) if header_row is not None else 1  # 0-indexed → 行数
-                total = max(0, ws.max_row - offset)
-                wb.close()
-                return total
+                try:
+                    from openpyxl import load_workbook
+                    wb = load_workbook(self.filepath, read_only=True)
+                    if sheet_name and sheet_name in wb.sheetnames:
+                        ws = wb[sheet_name]
+                    else:
+                        ws = wb.active
+                    offset = (header_row + 1) if header_row is not None else 1
+                    total = max(0, ws.max_row - offset)
+                    wb.close()
+                    return total
+                except Exception:
+                    # .xls 文件不受 openpyxl 支持，回退到 pandas 读取
+                    kwargs = {'header': header_row} if header_row is not None else {}
+                    if sheet_name:
+                        kwargs['sheet_name'] = sheet_name
+                    df = pd.read_excel(self.filepath, **kwargs)
+                    return len(df)
             else:
                 # CSV: 尝试常见编码
                 encodings = ['utf-8-sig', 'utf-8', 'gbk', 'gb2312', 'latin1', 'cp1252']
