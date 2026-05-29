@@ -1,0 +1,49 @@
+name: 构建 Windows 版
+
+on:
+  workflow_dispatch:  # 手动触发
+  push:
+    tags:
+      - 'v*'          # 推送 v1.0, v2.0 等标签时自动构建
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装依赖
+        run: |
+          pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r requirements.txt
+
+      - name: 构建 .exe
+        run: |
+          pyinstaller `
+            --name "DA数据清洗工具" `
+            --windowed `
+            --add-data "modules;modules" `
+            --add-data "templates;templates" `
+            --add-data "static;static" `
+            --add-data "config.py;." `
+            --hidden-import flask_session `
+            --hidden-import duckdb `
+            --hidden-import xlrd `
+            --hidden-import numpy `
+            --hidden-import pandas `
+            --hidden-import cryptography `
+            --collect-all cryptography `
+            run.py
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: DA数据清洗工具-Windows
+          path: dist/DA数据清洗工具/

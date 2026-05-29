@@ -358,7 +358,7 @@
         ];
 
         // ===== 当前格式选择（默认：已有期初期末） =====
-        let balanceFormat = 'calculated';
+        let balanceFormat = '{{ balance_format }}';
 
         function getBalanceFields() {
             return balanceStandardFields.filter(f => f.format === 'all' || f.format === balanceFormat);
@@ -367,8 +367,9 @@
         function onBalanceFormatChange(format) {
             balanceFormat = format;
             // 重新渲染映射表
-            const recMapping = recommendBalanceMapping().mapping;
-            const conf = recommendBalanceMapping().confidence;
+            const recResult = recommendBalanceMapping();
+            const recMapping = recResult.mapping;
+            const conf = recResult.confidence;
             renderMappingTable('balance-mapping-body', balanceUserFields, getBalanceFields(), recMapping, balanceUserFields, conf);
             // 更新提示文字
             const hint = document.getElementById('balance-hint-text');
@@ -867,11 +868,7 @@
             // 保存
             document.getElementById('save-mapping-btn').addEventListener('click', saveMapping);
 
-            // AI 智能映射
-            const aiBtn = document.getElementById('ai-auto-map-btn');
-            if (aiBtn) {
-                aiBtn.addEventListener('click', aiAutoMap);
-            }
+            // onclick 属性已绑定 aiAutoMap，此处不重复绑定
         });
     </script>
 </body>

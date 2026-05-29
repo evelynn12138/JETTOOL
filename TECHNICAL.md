@@ -180,7 +180,10 @@ class AICodeGenerator:
 - 严格限制只生成 SELECT 查询
 - `_validate_sql()`：检查 SQL 是否以 SELECT/WITH 开头
 - `_fix_strftime()`：将 strftime 调用替换为 DuckDB 兼容语法（EXTRACT / DATE_TRUNC）
-- `optimize_query()`：优化自然语言查询，扩展同义词（支持本地词典 + AI 两级增强）
+- `optimize_query()`：优化自然语言查询，三级增强（本地词典 + AI 关键词扩展 + AI 语义优化）
+  - 关键词扩展：中文术语 → 英文/缩写变体（调整 → adj、adjustment）
+  - 语义优化：模糊概念 → 具体表达（月底 → 最后五天）
+  - 人名识别：中文人名 → 拼音全拼 + 首字母缩写（周健 → zhoujian、zj）
 
 **提示词关键约束：**
 - 双引号包裹表名和列名（防中文问题）
@@ -408,17 +411,31 @@ execute_query()：DuckDB 本地执行
 - 数据仅在内存中处理，无需网络传输
 - API Key 经 Fernet 加密后存 session
 
-### 查询优化（同义词扩展）
+### 查询优化（AI 语义增强）
+
+AI 优化查询的三类增强（`POST /api/optimize-query` → `AICodeGenerator.optimize_query()`）：
 
 ```
-原始查询："筛选包含调整和冲销的凭证"
-    ↓ 本地词典扩展
-"筛选包含调整和冲销的凭证等相关关键词、调整、调、adj、adjustment、冲销、冲、reverse、reversal"
+原始查询："筛选出月底做账的凭证"
     ↓ AI 优化
-"筛选包含调整、冲销、reverse、adj、adjustment、reversal等相关关键词的凭证"
+"筛选出每个月最后五天的做账凭证"
+
+原始查询："筛选出摘要中包含调整的凭证"
+    ↓ AI 优化
+"筛选出摘要中包含调整、adj、adjustment等相关关键词的凭证"
+
+原始查询："筛选出制单人是周健的记录"
+    ↓ AI 优化
+"筛选出制单人是周健（含 zhoujian、zhou jian、zj、ZJ 等变体）的记录"
 ```
 
-后端合并策略：AI 优化结果优先，融合本地词典的同义词扩展。
+**三类增强规则：**
+1. **语义优化** — 模糊概念变具体：月底→最后五天、月初→前五天、最近→近30天
+2. **关键词扩展** — 中文术语补英文/缩写变体：调整→adj/adjustment、冲销→reverse/reversal；不扩展字段名同义词
+3. **人名识别** — 2~3字中文人名补充拼音全拼和首字母缩写：周健→zhoujian/zj
+
+**本地词典先行**：`synonym_dict.py` 先做初步同义词匹配，结果作为 AI 的参考上下文。AI 优化结果优先于本地词典。
+
 
 ### AI 代码复核
 
@@ -598,7 +615,39 @@ lsof -ti:5003 | xargs kill -9
 
 ---
 
-## 十一、依赖清单
+## 十一、Windows 打包
+
+### 方式一：GitHub Actions（推荐）
+
+仓库已配置 `.github/workflows/build-win.yml`，自动构建 Windows .exe：
+
+1. 推送代码到 GitHub
+2. 进入仓库 Actions 页面
+3. 选择 **"构建 Windows 版"** → **"Run workflow"**
+4. 等待几分钟，下载 **DA数据清洗工具-Windows** 工件（artifact）
+5. 解压后双击 `DA数据清洗工具.exe` 即可运行
+
+> 推送 git tag（如 `v1.0`）也会自动触发构建。
+
+### 方式二：Windows 本机构建
+
+在 Windows 电脑上操作：
+
+1. 安装 Python 3.9+（[python.org](https://www.python.org/downloads/)）
+2. 双击项目根目录的 `build_win.bat`
+3. 等待依赖安装和打包完成
+4. 在 `dist\DA数据清洗工具\` 找到 `DA数据清洗工具.exe`
+
+### 分发注意事项
+
+- `--windowed` 模式：不开命令行窗口，用户双击即用
+- 首次运行可能被 Windows Defender 拦截 → 点击"更多信息"→"仍要运行"
+- 数据存储在 `%USERPROFILE%\.da-cleaner\` 目录（session、上传文件、DuckDB 数据库）
+- macOS 打包：使用 `pyinstaller --windowed --add-data ... run.py`（路径分隔符用 `:`）
+
+---
+
+## 十二、依赖清单
 
 | 包名 | 版本 | 用途 |
 |------|------|------|

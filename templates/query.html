@@ -764,7 +764,7 @@
                 return;
             }
 
-            showLoading('正在执行代码...', '代码在安全沙箱中执行，请稍候');
+            showLoading('正在执行 SQL...', 'SQL 在本地 DuckDB 引擎中执行，请稍候');
 
             try {
                 const response = await fetch('/api/execute', {
@@ -1117,7 +1117,7 @@
                 if (count) count.textContent = data.queries.length;
 
                 list.innerHTML = data.queries.map(q => `
-                    <div class="saved-query-item" data-id="${q.id}">
+                    <div class="saved-query-item" data-id="${q.id}" data-query="${escapeHtml(q.query).replace(/"/g, '&quot;')}">
                         <label class="saved-query-checkbox" onclick="event.stopPropagation();">
                             <input type="checkbox" class="saved-query-check" value="${q.id}">
                         </label>
@@ -1156,28 +1156,11 @@
 
         function restoreSavedQuery(id) {
             // 点击收藏项，将查询文本恢复到输入框
-            const card = document.getElementById('saved-queries-card');
-            if (!card) return;
-            const checkboxes = card.querySelectorAll('.saved-query-check');
-            let name = '';
-            checkboxes.forEach(cb => {
-                if (cb.value === id) {
-                    // find the name from the parent DOM
-                    const item = cb.closest('.saved-query-item');
-                    const nameEl = item ? item.querySelector('.saved-query-name') : null;
-                    if (nameEl) name = nameEl.textContent;
-                }
-            });
-            // 从列表里找对应的 name
-            const items = card.querySelectorAll('.saved-query-item');
-            items.forEach(item => {
-                if (item.dataset.id === id) {
-                    const nameEl = item.querySelector('.saved-query-name');
-                    if (nameEl) name = nameEl.textContent;
-                }
-            });
-            if (name) {
-                document.getElementById('query-input').value = name;
+            const item = document.querySelector(`.saved-query-item[data-id="${id}"]`);
+            if (!item) return;
+            const query = item.dataset.query;
+            if (query) {
+                document.getElementById('query-input').value = query;
                 document.getElementById('query-input').scrollIntoView({ behavior: 'smooth' });
             }
         }

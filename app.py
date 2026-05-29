@@ -76,6 +76,43 @@ def _json_safe(obj):
         return _json_safe(obj.tolist())
     return obj
 
+def _df_to_list(df):
+    """Convert pandas DataFrame to list of dicts (may be None/empty)."""
+    if df is None or df.empty:
+        return []
+    return [dict(zip(df.columns, row)) for row in df.itertuples(index=False)]
+
+
+def _write_dicts_to_sheet(ws, rows, start_row=1, header_style=True):
+    """Write a list of dicts to an openpyxl worksheet starting at start_row.
+    Returns the next available row number.
+    """
+    if not rows:
+        return start_row
+    from openpyxl.styles import Font, Alignment, PatternFill
+    headers = list(rows[0].keys())
+    for ci, h in enumerate(headers, 1):
+        cell = ws.cell(row=start_row, column=ci, value=h)
+        if header_style:
+            cell.font = Font(bold=True, color='FFFFFF', size=11)
+            cell.fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+    for ri, row in enumerate(rows, start_row + 1):
+        for ci, h in enumerate(headers, 1):
+            val = row.get(h)
+            if val is None:
+                val = ''
+            ws.cell(row=ri, column=ci, value=val)
+    return start_row + 1 + len(rows)
+
+
+def _sum_col(rows, key):
+    """Sum a numeric column across a list of dicts."""
+    return sum(float(r.get(key, 0) or 0) for r in rows)
+
+
+
+
 
 def get_duckdb_engine():
     """获取或创建当前会话的 DuckDB 引擎"""
@@ -127,7 +164,6 @@ def index():
 @app.route('/debug/setup-demo')
 def debug_setup_demo():
     """临时：为截图预先配置会话数据"""
-    import pandas as pd
     from modules.data_processor import DataProcessor
 
     je_path = "/Users/evelynn/Desktop/EY AI/成都je.xlsx"
@@ -277,7 +313,8 @@ def field_mapper_page():
                          balance_data_info=balance_data_info,
                          has_balance_data=has_balance,
                          prefilled_journal_mapping=prefilled_journal,
-                         prefilled_balance_mapping=prefilled_balance)
+                         prefilled_balance_mapping=prefilled_balance,
+                         balance_format=session.get('balance_format', 'calculated'))
 
 @app.route('/balance-mapper', methods=['GET'])
 def balance_mapper_page():
@@ -404,78 +441,105 @@ def export_integrity_results():
         report = checker.export_report(reverse_carry_forward=reverse_cf, leaf_accounts=leaf_accts)
 
         import io
-        import pandas as pd
+        import openpyxl
+        from openpyxl.styles import Font, Alignment, PatternFill
+        wb = openpyxl.Workbook()
         output = io.BytesIO()
 
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # ====== Sheet 1: 序时账完整性 ======
-            journal_df = report.get('journal')
-            if journal_df is not None and not journal_df.empty:
-                total_amount = round(journal_df['汇总发生额'].sum(), 2)
-                info_rows = pd.DataFrame([
-                    {'指标': '汇总金额', '值': total_amount},
-                    {'指标': '凭证分组数', '值': len(journal_df)},
-                ])
-                info_rows.to_excel(writer, sheet_name='序时账完整性', index=False)
-                journal_df.to_excel(writer, sheet_name='序时账完整性', index=False, startrow=4)
-            else:
-                pd.DataFrame([{'提示': '无线程账数据或缺少必要字段'}]) \
-                    .to_excel(writer, sheet_name='序时账完整性', index=False)
+        hfont = Font(bold=True, color='FFFFFF', size=11)
+        hfill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
 
-            # ====== Sheet 2: 科目余额表完整性 ======
-            balance_df = report.get('balance')
-            if balance_df is not None and not balance_df.empty:
-                info_rows = pd.DataFrame([
-                    {'指标': '期初余额合计', '值': round(balance_df['期初余额'].sum(), 2)},
-                    {'指标': '期末余额合计', '值': round(balance_df['期末余额'].sum(), 2)},
-                    {'指标': '发生额合计(期末-期初)', '值': round(balance_df['发生额'].sum(), 2)},
-                    {'指标': '是否归零', '值': '是' if abs(balance_df['发生额'].sum()) < 0.01 else f'否（差额{round(balance_df["发生额"].sum(), 2)}）'},
-                    {'指标': '科目汇总数', '值': len(balance_df)},
-                ])
+        # ====== Sheet 1: 序时账完整性 ======
+        ws1 = wb.active
+        ws1.title = '序时账完整性'
+        jrows = _df_to_list(report.get('journal'))
+        if jrows:
+            total = round(_sum_col(jrows, '汇总发生额'), 2)
+            info = [{"指标": "汇总金额", "值": total}, {"指标": "凭证分组数", "值": len(jrows)}]
+            for ri, row in enumerate(info, 1):
+                for ci, (k, v) in enumerate(row.items(), 1):
+                    cell = ws1.cell(row=ri, column=ci, value=v)
+                    if ri == 1:
+                        cell.font = hfont
+                        cell.fill = hfill
+            for ri, row in enumerate(jrows, 4):
+                for ci, (k, v) in enumerate(row.items(), 1):
+                    ws1.cell(row=ri, column=ci, value=v if v is not None else '')
+        else:
+            ws1.cell(row=1, column=1, value="提示").font = hfont
+            ws1.cell(row=2, column=1, value="无线程账数据或缺少必要字段")
 
-                # 反结转模式：额外展示调整信息
-                if report.get('reverse_carry_forward_applied') and '结转损益金额' in balance_df.columns:
-                    cf_total = round(balance_df['结转损益金额'].sum(), 2)
-                    cf_info_row = pd.DataFrame([{'指标': '结转损益调整额', '值': cf_total}])
-                    info_rows = pd.concat([info_rows, cf_info_row], ignore_index=True)
+        # ====== Sheet 2: 科目余额表完整性 ======
+        ws2 = wb.create_sheet('科目余额表完整性')
+        brows = _df_to_list(report.get('balance'))
+        if brows:
+            bs = round(_sum_col(brows, '期初余额'), 2)
+            es = round(_sum_col(brows, '期末余额'), 2)
+            amt = round(_sum_col(brows, '发生额'), 2)
+            zero = '是' if abs(amt) < 0.01 else f'否（差额{amt}）'
+            info = [{'指标': '期初余额合计', '值': bs},
+                    {'指标': '期末余额合计', '值': es},
+                    {'指标': '发生额合计(期末-期初)', '值': amt},
+                    {'指标': '是否归零', '值': zero},
+                    {'指标': '科目汇总数', '值': len(brows)}]
+            if report.get('reverse_carry_forward_applied') and brows and '结转损益金额' in brows[0]:
+                cft = round(_sum_col(brows, '结转损益金额'), 2)
+                info.append({'指标': '结转损益调整额', '值': cft})
+            for ri, row in enumerate(info, 1):
+                for ci, (k, v) in enumerate(row.items(), 1):
+                    cell = ws2.cell(row=ri, column=ci, value=v)
+                    if ri == 1:
+                        cell.font = hfont
+                        cell.fill = hfill
+            for ri, row in enumerate(brows, len(info) + 3):
+                for ci, (k, v) in enumerate(row.items(), 1):
+                    ws2.cell(row=ri, column=ci, value=v if v is not None else '')
+        else:
+            ws2.cell(row=1, column=1, value="提示").font = hfont
+            ws2.cell(row=2, column=1, value="无科目余额表数据或缺少必要字段")
 
-                info_rows.to_excel(writer, sheet_name='科目余额表完整性', index=False)
-                balance_df.to_excel(writer, sheet_name='科目余额表完整性', index=False, startrow=len(info_rows) + 2)
-            else:
-                pd.DataFrame([{'提示': '无科目余额表数据或缺少必要字段'}]) \
-                    .to_excel(writer, sheet_name='科目余额表完整性', index=False)
+        # ====== Sheet 3: 交叉验证 ======
+        ws3 = wb.create_sheet('交叉验证')
+        crows = _df_to_list(report.get('cross_validation'))
+        if crows:
+            for row in crows:
+                for k in list(row.keys()):
+                    if row[k] is None:
+                        row[k] = 0
+                    try:
+                        row[k] = float(row[k])
+                    except (ValueError, TypeError):
+                        pass
+            js = round(_sum_col(crows, '序时账发生额'), 2)
+            bs2 = round(_sum_col(crows, '科目余额表发生额'), 2)
+            ds = round(sum(abs(r.get('差异', 0) or 0) for r in crows), 2)
+            mc = sum(1 for r in crows if abs(r.get('差异', 0) or 0) <= 0.01)
+            mm = sum(1 for r in crows if abs(r.get('差异', 0) or 0) > 0.01)
+            info = [{'指标': '序时账发生额合计', '值': js},
+                    {'指标': '余额表发生额合计', '值': bs2},
+                    {'指标': '差异绝对值合计', '值': ds},
+                    {'指标': '汇总科目数', '值': len(crows)},
+                    {'指标': '完全一致数', '值': mc},
+                    {'指标': '存在差异数', '值': mm}]
+            for ri, row in enumerate(info, 1):
+                for ci, (k, v) in enumerate(row.items(), 1):
+                    cell = ws3.cell(row=ri, column=ci, value=v)
+                    if ri == 1:
+                        cell.font = hfont
+                        cell.fill = hfill
+            pref = ['公司名', '科目编号', '科目名称', '科目余额表期初',
+                    '科目余额表期末', '科目余额表发生额', '序时账发生额', '差异']
+            allk = list(crows[0].keys())
+            ordered = [c for c in pref if c in allk] + [c for c in allk if c not in pref]
+            for ri, row in enumerate(crows, 7):
+                for ci, k in enumerate(ordered, 1):
+                    val = row.get(k)
+                    ws3.cell(row=ri, column=ci, value=val if val is not None else '')
+        else:
+            ws3.cell(row=1, column=1, value="提示").font = hfont
+            ws3.cell(row=2, column=1, value="交叉验证无法执行：科目余额表数据为空或缺少必要字段（需含：公司名、科目编号、科目名称、期初余额、期末余额），请确认已正确上传并映射科目余额表")
 
-            # ====== Sheet 3: 交叉验证 ======
-            cross_df = report.get('cross_validation')
-            if cross_df is not None and not cross_df.empty:
-                cross_df = cross_df.fillna(0)
-                # 确保所有关键列都有值
-                for col in ['序时账发生额', '科目余额表发生额', '差异']:
-                    if col in cross_df.columns:
-                        cross_df[col] = pd.to_numeric(cross_df[col], errors='coerce').fillna(0)
-
-                info_rows = pd.DataFrame([
-                    {'指标': '序时账发生额合计', '值': round(cross_df['序时账发生额'].sum(), 2)},
-                    {'指标': '余额表发生额合计', '值': round(cross_df['科目余额表发生额'].sum(), 2)},
-                    {'指标': '差异绝对值合计', '值': round(cross_df['差异'].abs().sum(), 2)},
-                    {'指标': '汇总科目数', '值': len(cross_df)},
-                    {'指标': '完全一致数', '值': int((cross_df['差异'].abs() <= 0.01).sum())},
-                    {'指标': '存在差异数', '值': int((cross_df['差异'].abs() > 0.01).sum())},
-                ])
-                info_rows.to_excel(writer, sheet_name='交叉验证', index=False)
-
-                # 列顺序整理
-                preferred_order = ['公司名', '科目编号', '科目名称', '科目余额表期初',
-                                   '科目余额表期末', '科目余额表发生额', '序时账发生额', '差异']
-                available = [c for c in preferred_order if c in cross_df.columns]
-                others = [c for c in cross_df.columns if c not in preferred_order]
-                cross_df = cross_df[available + others]
-
-                cross_df.to_excel(writer, sheet_name='交叉验证', index=False, startrow=6)
-            else:
-                pd.DataFrame([{'提示': '交叉验证无法执行：科目余额表数据为空或缺少必要字段（需含：公司名、科目编号、科目名称、期初余额、期末余额），请确认已正确上传并映射科目余额表'}]) \
-                    .to_excel(writer, sheet_name='交叉验证', index=False)
-
+        wb.save(output)
         output.seek(0)
         return send_file(
             output,
@@ -488,8 +552,6 @@ def export_integrity_results():
         import traceback
         app.logger.error(f"[EXPORT ERROR] {str(e)}\n{traceback.format_exc()}")
         return jsonify({'success': False, 'error': f'导出失败: {str(e)}'})
-
-
 # ====== 完整性测试 AI 多轮对话 ======
 
 INTEGRITY_TOOLS = [
@@ -970,14 +1032,23 @@ def _execute_integrity_tool(tool_name: str, arguments: dict) -> dict:
             report = checker.export_report(
                 reverse_carry_forward=arguments.get('reverse_carry_forward', False),
                 leaf_accounts=arguments.get('leaf_accounts', False))
-            import io, pandas as pd, base64
-            output = io.BytesIO()
+            import io, openpyxl, base64
+            wb = openpyxl.Workbook()
             sheet_keys = ['journal', 'balance', 'cross_validation']
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                for key in sheet_keys:
-                    df = report.get(key)
-                    if df is not None and hasattr(df, 'empty') and not df.empty:
-                        df.to_excel(writer, sheet_name=key[:31], index=False)
+            sheet_names = {'journal': '序时账', 'balance': '科目余额表', 'cross_validation': '交叉验证'}
+            first = True
+            for key in sheet_keys:
+                rows = _df_to_list(report.get(key))
+                if not rows:
+                    continue
+                ws = wb.active if first else wb.create_sheet()
+                first = False
+                ws.title = sheet_names.get(key, key[:31])
+                for ri, row in enumerate(rows, 1):
+                    for ci, (k, v) in enumerate(row.items(), 1):
+                        ws.cell(row=ri, column=ci, value=v if v is not None else '')
+            output = io.BytesIO()
+            wb.save(output)
             output.seek(0)
             b64 = base64.b64encode(output.getvalue()).decode()
             return {"result": "报告已生成（含序时账、科目余额表、交叉验证三个Sheet），请使用下方下载按钮获取", "file": b64, "filename": "integrity_report.xlsx"}
@@ -1283,39 +1354,38 @@ def configure_fields():
         session['data_info'] = data_info
         app.logger.info(f"[CONFIGURE_FIELDS] session data_info keys after: {list(session.get('data_info', {}).keys())}")
 
-    # 存储科目余额表映射（如果有）
-    if balance_field_mapping:
-        session['balance_field_mapping'] = balance_field_mapping
-
     # 存储科目余额表格式
     balance_format = data.get('balance_format', 'calculated')
     session['balance_format'] = balance_format
     app.logger.info(f"[CONFIGURE_FIELDS] balance_format: {balance_format}")
 
-    # 同样更新 balance_data_info
-    balance_info = session.get('balance_data_info', {})
-    if balance_info:
-        rev_balance = {v: k for k, v in balance_field_mapping.items()}
-        mapped_fields = []
-        for field in balance_info.get('fields', []):
-            fname = field.get('name', '')
-            if fname in rev_balance:
-                mf = field.copy()
-                mf['name'] = rev_balance[fname]
-                mf['original_name'] = fname
-                mapped_fields.append(mf)
-            else:
-                mapped_fields.append(field.copy())
-        balance_info['mapped_fields'] = mapped_fields
+    # 存储科目余额表映射（如果有），同时更新 balance_data_info
+    if balance_field_mapping:
+        session['balance_field_mapping'] = balance_field_mapping
 
-        bpreview = balance_info.get('preview', [])
-        if bpreview:
-            mapped_preview = []
-            for row in bpreview:
-                mrow = {}
-                for key, value in row.items():
-                    mrow[rev_balance.get(key, key)] = value
-                mapped_preview.append(mrow)
+        balance_info = session.get('balance_data_info', {})
+        if balance_info:
+            rev_balance = {v: k for k, v in balance_field_mapping.items()}
+            mapped_fields = []
+            for field in balance_info.get('fields', []):
+                fname = field.get('name', '')
+                if fname in rev_balance:
+                    mf = field.copy()
+                    mf['name'] = rev_balance[fname]
+                    mf['original_name'] = fname
+                    mapped_fields.append(mf)
+                else:
+                    mapped_fields.append(field.copy())
+            balance_info['mapped_fields'] = mapped_fields
+
+            bpreview = balance_info.get('preview', [])
+            if bpreview:
+                mapped_preview = []
+                for row in bpreview:
+                    mrow = {}
+                    for key, value in row.items():
+                        mrow[rev_balance.get(key, key)] = value
+                    mapped_preview.append(mrow)
             balance_info['mapped_preview'] = mapped_preview
 
         session['balance_data_info'] = balance_info
@@ -2166,73 +2236,85 @@ def export_saved_queries():
         return jsonify({'success': False, 'error': '未找到选中的查询'})
 
     try:
-        import pandas as pd
         import openpyxl
         from openpyxl.styles import Font, Alignment, PatternFill
+        import io
 
-        filename = f'export_saved_{int(time.time())}.xlsx'
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        filename = '收藏查询汇总.xlsx'
+        wb = openpyxl.Workbook()
+        # remove default sheet — we create per-query sheets below
+        wb.remove(wb.active)
+        header_font = Font(bold=True, color='FFFFFF', size=11)
+        header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
 
-        with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-            for idx, sq in enumerate(selected):
-                sheet_name = sq.get('name', f'查询{idx+1}')[:31]
+        for idx, sq in enumerate(selected):
+            sheet_name = sq.get('name', f'查询{idx+1}')[:31]
+            ws = wb.create_sheet(sheet_name)
 
-                result_data = None
-                if sq.get('result_file'):
-                    rfpath = os.path.join(app.config['UPLOAD_FOLDER'], sq['result_file'])
-                    if os.path.exists(rfpath):
-                        try:
-                            with open(rfpath, 'r', encoding='utf-8') as f:
-                                result_data = json_module.load(f)
-                        except Exception:
-                            pass
+            result_data = None
+            if sq.get('result_file'):
+                rfpath = os.path.join(app.config['UPLOAD_FOLDER'], sq['result_file'])
+                if os.path.exists(rfpath):
+                    try:
+                        with open(rfpath, 'r', encoding='utf-8') as f:
+                            result_data = json_module.load(f)
+                    except Exception:
+                        pass
 
-                if not result_data:
-                    info_df = pd.DataFrame([
-                        {'项目': '查询名称', '内容': sq.get('name', '')},
-                        {'项目': '自然语言查询', '内容': sq.get('query', '')},
-                        {'项目': 'SQL代码', '内容': sq.get('sql', '')},
-                        {'项目': '备注', '内容': '结果数据不可用'},
-                    ])
-                    info_df.to_excel(writer, sheet_name=sheet_name, index=False)
-                    continue
-
-                rd = result_data.get('result', result_data)
-                columns = rd.get('columns', [])
-                rows = rd.get('data', [])
-
-                info_rows = [
-                    {'信息': '查询名称', '内容': sq.get('name', '')},
-                    {'信息': '自然语言查询', '内容': sq.get('query', '')},
-                    {'信息': 'SQL代码', '内容': sq.get('sql', '')},
-                    {'信息': '记录数', '内容': len(rows)},
-                ]
-                info_df = pd.DataFrame(info_rows)
-                info_df.to_excel(writer, sheet_name=sheet_name, index=False)
-                ws = writer.sheets[sheet_name]
-                header_font = Font(bold=True, color='FFFFFF', size=11)
-                header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
-                for cell in ws[1]:
-                    cell.font = header_font
-                    cell.fill = header_fill
-                    cell.alignment = Alignment(horizontal='center', vertical='center')
+            if not result_data:
+                ws.cell(row=1, column=1, value='项目').font = header_font
+                ws.cell(row=1, column=1).fill = header_fill
+                ws.cell(row=1, column=2, value='内容')
+                ws.cell(row=1, column=2).font = header_font
+                ws.cell(row=1, column=2).fill = header_fill
+                ws.cell(row=2, column=1, value='查询名称')
+                ws.cell(row=2, column=2, value=sq.get('name', ''))
+                ws.cell(row=3, column=1, value='自然语言查询')
+                ws.cell(row=3, column=2, value=sq.get('query', ''))
+                ws.cell(row=4, column=1, value='SQL代码')
+                ws.cell(row=4, column=2, value=sq.get('sql', ''))
+                ws.cell(row=5, column=1, value='备注')
+                ws.cell(row=5, column=2, value='结果数据不可用')
                 ws.column_dimensions['A'].width = 16
                 ws.column_dimensions['B'].width = 80
+                continue
 
-                if rows and columns:
-                    start_row = 7
+            rd = result_data.get('result', result_data)
+            columns = rd.get('columns', [])
+            rows = rd.get('data', [])
+
+            # Info rows
+            info_data = [
+                ('查询名称', sq.get('name', '')),
+                ('自然语言查询', sq.get('query', '')),
+                ('SQL代码', sq.get('sql', '')),
+                ('记录数', len(rows)),
+            ]
+            ws.cell(row=1, column=1, value='信息').font = header_font
+            ws.cell(row=1, column=1).fill = header_fill
+            ws.cell(row=1, column=2, value='内容').font = header_font
+            ws.cell(row=1, column=2).fill = header_fill
+            for ri, (k, v) in enumerate(info_data, 2):
+                ws.cell(row=ri, column=1, value=k)
+                ws.cell(row=ri, column=2, value=v)
+            ws.column_dimensions['A'].width = 16
+            ws.column_dimensions['B'].width = 80
+
+            # Data rows starting from row 7
+            if rows and columns:
+                for ci, col_name in enumerate(columns, 1):
+                    cell = ws.cell(row=7, column=ci, value=col_name)
+                    cell.font = Font(bold=True)
+                    cell.fill = PatternFill(start_color='D9E2F3', end_color='D9E2F3', fill_type='solid')
+                for ri, row in enumerate(rows, 8):
                     for ci, col_name in enumerate(columns, 1):
-                        cell = ws.cell(row=start_row, column=ci, value=col_name)
-                        cell.font = Font(bold=True)
-                        cell.fill = PatternFill(start_color='D9E2F3', end_color='D9E2F3', fill_type='solid')
-                    for ri, row in enumerate(rows, start_row + 1):
-                        for ci, col_name in enumerate(columns, 1):
-                            val = row.get(col_name, '')
-                            if val is None:
-                                val = ''
-                            ws.cell(row=ri, column=ci, value=val)
+                        val = row.get(col_name, '')
+                        ws.cell(row=ri, column=ci, value=val if val is not None else '')
 
-        return send_file(filepath, as_attachment=True, download_name=filename)
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return send_file(buf, as_attachment=True, download_name=filename, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
     except Exception as e:
         app.logger.error(f"[EXPORT SAVED] 批量导出失败: {e}")
@@ -2544,85 +2626,161 @@ def export_data():
         return jsonify({'success': False, 'error': '执行结果为空，无法导出'})
 
     try:
-        import pandas as pd
-
-        # 根据结果类型创建DataFrame
-        df = None
-        result_type = result_data.get('type')
-
-        if result_type == 'dataframe':
-            # 处理DataFrame类型结果
-            columns = result_data.get('columns', [])
-            data_list = result_data.get('data', [])
-            if data_list and columns:
-                df = pd.DataFrame(data_list, columns=columns)
-        elif result_type == 'list' or result_type == 'tuple':
-            # 处理列表/元组类型结果
-            values = result_data.get('values', [])
-            if values:
-                # 如果列表元素是字典，可以尝试转换为DataFrame
-                if values and isinstance(values[0], dict):
-                    df = pd.DataFrame(values)
-                else:
-                    df = pd.DataFrame({'值': values})
-        elif result_type == 'dict':
-            # 处理字典类型结果
-            dict_data = result_data.get('data', {})
-            if dict_data:
-                # 将字典转换为DataFrame
-                df = pd.DataFrame([dict_data])
-        elif result_type == 'scalar':
-            # 处理标量类型结果
-            value = result_data.get('value')
-            df = pd.DataFrame({'结果': [value]})
-        else:
-            return jsonify({'success': False, 'error': f'不支持的结果类型: {result_type}'})
-
-        if df is None or len(df) == 0:
-            return jsonify({'success': False, 'error': '没有可导出的数据'})
-
         # 生成文件名
         import time
         timestamp = int(time.time())
         filename = f'export_{timestamp}.{format_type}'
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
 
-        # 导出文件
+        # ---- CSV 导出：优先用 DuckDB COPY（原生写磁盘，比 Python 快数量级） ----
         if format_type == 'csv':
-            df.to_csv(filepath, index=False, encoding='utf-8-sig')
-        else:  # xlsx
-            query_info = session.get('last_query_info', {})
-            explanation = session.get('last_explanation', '')
-            with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-                # Sheet 1: 查询信息
-                info_rows = []
-                info_rows.append({'项目': '自然语言查询', '内容': query_info.get('query_text', '')})
-                info_rows.append({'项目': 'SQL代码', '内容': query_info.get('sql_code', '')})
-                info_rows.append({'项目': '代码解释', '内容': explanation})
-                info_df = pd.DataFrame(info_rows)
-                info_df.to_excel(writer, sheet_name='查询信息', index=False)
-                ws = writer.sheets['查询信息']
-                ws.column_dimensions['A'].width = 14
-                ws.column_dimensions['B'].width = 90
-                from openpyxl.styles import Font, Alignment, PatternFill
-                header_font = Font(bold=True, color='FFFFFF', size=11)
-                header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
-                for cell in ws[1]:
-                    cell.font = header_font
-                    cell.fill = header_fill
-                    cell.alignment = Alignment(horizontal='center', vertical='center')
-                for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=2, max_col=2):
-                    for cell in row:
-                        cell.alignment = Alignment(wrap_text=True, vertical='top')
-                ws.row_dimensions[2].height = 40
-                ws.row_dimensions[3].height = 120
-                ws.row_dimensions[4].height = 200
-                # Sheet 2: 查询结果
-                df.to_excel(writer, sheet_name='查询结果', index=False)
+            sql_code = session.get('last_query_info', {}).get('sql_code', '')
+            engine = get_duckdb_engine()
+            if sql_code and session.get('duckdb_imported') and engine.table_exists('data'):
+                try:
+                    # DuckDB COPY 直接写 CSV，绕过 Python 内存
+                    engine._conn.execute(f"COPY ({sql_code}) TO '{filepath}' (HEADER, DELIMITER ',')")
+                    return send_file(filepath, as_attachment=True, download_name=filename)
+                except Exception as e:
+                    app.logger.warning(f"[EXPORT] DuckDB COPY 失败，回退到 csv.writer: {e}")
+
+            # 回退：从 session 结果写 CSV（流式写入，也够快）
+            import csv
+            result_type = result_data.get('type')
+            if result_type != 'dataframe':
+                return jsonify({'success': False, 'error': '不支持此类型导出为 CSV'})
+            headers = result_data.get('columns', [])
+            data_rows = result_data.get('data', [])
+            if not data_rows:
+                return jsonify({'success': False, 'error': '没有可导出的数据'})
+            with open(filepath, 'w', encoding='utf-8-sig', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(headers)
+                for row in data_rows:
+                    writer.writerow([row.get(h, '') for h in headers])
+            return send_file(filepath, as_attachment=True, download_name=filename)
+
+        # ---- XLSX 导出 ----
+        import openpyxl
+        from openpyxl.styles import Font, Alignment, PatternFill
+
+        # 归一化数据
+        headers = []
+        data_rows = []
+        result_type = result_data.get('type')
+        if result_type == 'dataframe':
+            headers = result_data.get('columns', [])
+            data_rows = result_data.get('data', [])
+        elif result_type in ('list', 'tuple'):
+            values = result_data.get('values', [])
+            if values and isinstance(values[0], dict):
+                headers = list(values[0].keys())
+                data_rows = values
+            else:
+                headers = ['值']
+                data_rows = [{'值': v} for v in values]
+        elif result_type == 'dict':
+            dd = result_data.get('data', {})
+            if dd:
+                headers = list(dd.keys())
+                data_rows = [dd]
+        elif result_type == 'scalar':
+            data_rows = [{'结果': result_data.get('value')}]
+            headers = ['结果']
+        else:
+            return jsonify({'success': False, 'error': f'不支持的结果类型: {result_type}'})
+        if not data_rows:
+            return jsonify({'success': False, 'error': '没有可导出的数据'})
+
+        query_info = session.get('last_query_info', {})
+        explanation = session.get('last_explanation', '')
+        hfont = Font(bold=True, color='FFFFFF', size=11)
+        hfill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+
+        # 大数据量使用 write_only 模式（流式写入，不驻留内存）
+        is_large = len(data_rows) > 10000
+        if is_large:
+            wb = openpyxl.Workbook(write_only=True)
+            # Sheet 1: 查询信息（先用常规模式写好 info sheet）
+            # write_only 下不能改 sheet 名/样式，直接用一个常规 workbook 写 info
+            import io as _io
+            info_wb = openpyxl.Workbook()
+            info_ws = info_wb.active
+            info_ws.title = '查询信息'
+            for ci, val in enumerate(['项目', '内容'], 1):
+                c = info_ws.cell(row=1, column=ci, value=val)
+                c.font = hfont
+                c.fill = hfill
+            for ri, (k, v) in enumerate([('自然语言查询', query_info.get('query_text', '')),
+                                          ('SQL代码', query_info.get('sql_code', '')),
+                                          ('代码解释', explanation)], 2):
+                info_ws.cell(row=ri, column=1, value=k)
+                info_ws.cell(row=ri, column=2, value=v)
+            info_ws.column_dimensions['A'].width = 14
+            info_ws.column_dimensions['B'].width = 90
+            info_ws.row_dimensions[2].height = 40
+            info_ws.row_dimensions[3].height = 120
+            info_ws.row_dimensions[4].height = 200
+            # Sheet 2: 查询结果（write_only 流式写入）
+            ws2 = wb.create_sheet(title='查询结果')
+            ws2.append(headers)
+            for row in data_rows:
+                ws2.append([row.get(h, '') if row.get(h) is not None else '' for h in headers])
+            # 合并两个 workbook
+            wb.save(filepath)
+            # 用 info workbook 覆盖写入同名 sheet（openpyxl 会替换已有 sheet）
+            from openpyxl import load_workbook
+            wb2 = load_workbook(filepath)
+            # 删除 write_only 版自动生成的 info sheet（如果有）
+            if '查询信息' in wb2.sheetnames:
+                del wb2['查询信息']
+            # 插入 info 作为第一个 sheet
+            wb2._sheets.insert(0, info_ws._workspace if hasattr(info_ws, '_workspace') else None)
+            # 更简单：直接复制 info_ws 内容
+            wb2.create_sheet('查询信息', 0)
+            ws_dest = wb2['查询信息']
+            for row in info_ws.iter_rows(min_row=1, max_row=info_ws.max_row, max_col=info_ws.max_column, values_only=False):
+                vals = [cell.value for cell in row]
+                ws_dest.append(vals)
+                # copy styles for header
+                if row[0].row == 1:
+                    for ci in range(1, len(vals)+1):
+                        ws_dest.cell(row=1, column=ci).font = hfont
+                        ws_dest.cell(row=1, column=ci).fill = hfill
+            wb2.save(filepath)
+        else:
+            # 小数据量：常规模式，带样式
+            wb = openpyxl.Workbook()
+            ws1 = wb.active
+            ws1.title = '查询信息'
+            ws1.cell(row=1, column=1, value='项目').font = hfont
+            ws1.cell(row=1, column=1).fill = hfill
+            ws1.cell(row=1, column=2, value='内容').font = hfont
+            ws1.cell(row=1, column=2).fill = hfill
+            for ri, (k, v) in enumerate([('自然语言查询', query_info.get('query_text', '')),
+                                          ('SQL代码', query_info.get('sql_code', '')),
+                                          ('代码解释', explanation)], 2):
+                ws1.cell(row=ri, column=1, value=k)
+                ws1.cell(row=ri, column=2, value=v)
+            ws1.column_dimensions['A'].width = 14
+            ws1.column_dimensions['B'].width = 90
+            ws1.row_dimensions[2].height = 40
+            ws1.row_dimensions[3].height = 120
+            ws1.row_dimensions[4].height = 200
+            # 数据 sheet
+            ws2 = wb.create_sheet('查询结果')
+            for ci, h in enumerate(headers, 1):
+                ws2.cell(row=1, column=ci, value=h).font = Font(bold=True)
+            for ri, row in enumerate(data_rows, 2):
+                for ci, h in enumerate(headers, 1):
+                    val = row.get(h, '')
+                    ws2.cell(row=ri, column=ci, value=val if val is not None else '')
+            wb.save(filepath)
 
         return send_file(filepath, as_attachment=True, download_name=filename)
 
     except Exception as e:
+        app.logger.error(f"[EXPORT ERROR] {e}")
         return jsonify({'success': False, 'error': f'导出失败: {str(e)}'})
 
 
