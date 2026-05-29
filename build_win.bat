@@ -58,7 +58,6 @@ pyinstaller ^
     --add-data "config.py;." ^
     --hidden-import flask_session ^
     --hidden-import duckdb ^
-    --hidden-import xlrd ^
     --hidden-import numpy ^
     --hidden-import pandas ^
     --hidden-import cryptography ^

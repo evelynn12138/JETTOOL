@@ -506,8 +506,8 @@ class IntegrityChecker:
         if '科目编号' not in schema:
             raise ValueError("科目余额表缺少「科目编号」字段，无法筛选末级科目")
 
-        # 用窗口函数 LEAD 判断下一行，比较前4位和长度
-        # 按 ASC 排序：短编码在前，长编码在后，比较 N 与 N+1 长度即可判断父子关系
+        # 用窗口函数 LEAD 判断下一行
+        # 末级判断：如果当前编码是下一行的前缀，则当前行不是末级（其下有子级）
         self.engine._conn.execute(f"""
             CREATE TEMP VIEW balance_leaf AS
             WITH sorted AS (
@@ -525,10 +525,8 @@ class IntegrityChecker:
             SELECT *
             FROM sorted
             WHERE _next_code IS NULL                                           -- 最后一行（必定是末级）
-               OR SUBSTR(CAST("科目编号" AS VARCHAR), 1, 4)
-                  != SUBSTR(_next_code, 1, 4)                                  -- 前4位不同（不同科目组）
-               OR LENGTH(CAST("科目编号" AS VARCHAR))
-                  >= LENGTH(_next_code)                                        -- 长度不短于下一行（同级或更细）
+               OR CAST("科目编号" AS VARCHAR) !=
+                  SUBSTR(_next_code, 1, LENGTH(CAST("科目编号" AS VARCHAR)))   -- 下个编码不以当前编码开头 → 当前是末级
         """)
 
         # 验证结果

@@ -14,8 +14,10 @@ class DataProcessor:
 
     def _detect_file_type(self) -> str:
         ext = os.path.splitext(self.filepath)[1].lower()
-        if ext in ['.xlsx', '.xls']:
+        if ext == '.xlsx':
             return 'excel'
+        elif ext == '.xls':
+            raise ValueError("不支持 .xls 格式，请将文件另存为 .xlsx 后重试")
         elif ext == '.csv':
             return 'csv'
         else:
@@ -23,19 +25,12 @@ class DataProcessor:
 
     @staticmethod
     def get_xlsx_sheet_names(filepath: str) -> list:
-        """获取 Excel 文件的所有 sheet 名称（支持 .xlsx 和 .xls）"""
-        ext = os.path.splitext(filepath)[1].lower()
-        if ext == '.xls':
-            import xlrd
-            wb = xlrd.open_workbook(filepath)
-            sheets = wb.sheet_names()
-            return sheets
-        else:
-            from openpyxl import load_workbook
-            wb = load_workbook(filepath, read_only=True)
-            sheets = wb.sheetnames
-            wb.close()
-            return sheets
+        """获取 Excel 文件的所有 sheet 名称（支持 .xlsx）"""
+        from openpyxl import load_workbook
+        wb = load_workbook(filepath, read_only=True)
+        sheets = wb.sheetnames
+        wb.close()
+        return sheets
 
     @staticmethod
     def preview_raw(filepath: str, nrows: int = 15) -> dict:
@@ -44,40 +39,24 @@ class DataProcessor:
         返回值: { sheet_name: { rows: [[...], ...], total_rows: N, total_cols: N } }
         """
         ext = os.path.splitext(filepath)[1].lower()
-        if ext in ['.xlsx', '.xls']:
-            if ext == '.xls':
-                import xlrd
-                wb = xlrd.open_workbook(filepath)
-                result = {}
-                for name in wb.sheet_names():
-                    ws = wb.sheet_by_name(name)
-                    rows = []
-                    for i in range(min(nrows, ws.nrows)):
-                        rows.append([str(ws.cell_value(i, c)) if ws.cell_type(i, c) != 0 else '' for c in range(ws.ncols)])
-                    result[name] = {
-                        'rows': rows,
-                        'total_rows': ws.nrows,
-                        'total_cols': ws.ncols,
-                    }
-                return result
-            else:
-                from openpyxl import load_workbook
-                wb = load_workbook(filepath, read_only=True)
-                result = {}
-                for name in wb.sheetnames:
-                    ws = wb[name]
-                    rows = []
-                    for i, row in enumerate(ws.iter_rows(values_only=True)):
-                        if i >= nrows:
-                            break
-                        rows.append([str(c) if c is not None else '' for c in row])
-                    result[name] = {
-                        'rows': rows,
-                        'total_rows': ws.max_row,
-                        'total_cols': ws.max_column,
-                    }
-                wb.close()
-                return result
+        if ext == '.xlsx':
+            from openpyxl import load_workbook
+            wb = load_workbook(filepath, read_only=True)
+            result = {}
+            for name in wb.sheetnames:
+                ws = wb[name]
+                rows = []
+                for i, row in enumerate(ws.iter_rows(values_only=True)):
+                    if i >= nrows:
+                        break
+                    rows.append([str(c) if c is not None else '' for c in row])
+                result[name] = {
+                    'rows': rows,
+                    'total_rows': ws.max_row,
+                    'total_cols': ws.max_column,
+                }
+            wb.close()
+            return result
         else:
             # CSV — 当作单个 sheet 处理
             import csv
@@ -141,7 +120,7 @@ class DataProcessor:
                     wb.close()
                     return total
                 except Exception:
-                    # .xls 文件不受 openpyxl 支持，回退到 pandas 读取
+                    # 回退到 pandas 读取
                     kwargs = {'header': header_row} if header_row is not None else {}
                     if sheet_name:
                         kwargs['sheet_name'] = sheet_name
