@@ -9,6 +9,8 @@ DA数据清洗业务AI应用是一个基于 Flask 的本地财务数据查询分
 - 数据处理：DuckDB + Pandas 2.1
 - AI 接口：兼容 OpenAI 协议的 API（DeepSeek / 百炼 / Kimi 等）
 - SQL 生成：AI 生成 DuckDB SQL，本地引擎执行
+- 财务报表清洗：AI 识别结构（读前 10 行）+ 规则引擎提取（无二次 AI 调用）
+- 科目余额表核对：规则映射引擎（编号前缀 60+ 规则 + 名称关键词 40+ 规则）+ 模糊匹配 + AI 差异分析
 - 数据加密：Fernet 对称加密（API Key 存储）
 - Excel 读写：openpyxl 3.1
 - 前端：原生 HTML/CSS/JS（无前端框架），CodeMirror 代码编辑器
@@ -32,6 +34,8 @@ DA数据清洗业务AI应用/
 │   ├── duckdb_engine.py            # DuckDBEngine - DuckDB 封装（建表/查询/导出）
 │   ├── ai_codegen.py               # AICodeGenerator - AI SQL 生成
 │   ├── integrity_checker.py        # IntegrityChecker - DuckDB SQL 完整性测试
+│   ├── report_cleaner.py           # ReportCleaner - 财务报表清洗（AI 结构识别 + 规则提取）
+│   ├── report_reconciliation.py    # ReconciliationEngine - 科目余额表↔报表核对
 │   ├── synonym_dict.py             # 财务同义词词典（本地扩展）
 │   ├── mapping_history.py          # 字段映射历史记录与模糊匹配
 │   ├── preset_rules.py             # 筛选规则包管理系统
@@ -40,17 +44,18 @@ DA数据清洗业务AI应用/
 │   ├── crypto_utils.py             # API Key 加密/解密（Fernet）
 │   └── utils.py                    # 工具函数
 │
-├── templates/                      # Jinja2 页面模板（5 步流程）
+├── templates/                      # Jinja2 页面模板（5 步流程 + 扩展功能）
 │   ├── intro.html                  # 产品介绍首页
 │   ├── upload.html                 # 步骤1：文件上传（含 sheet/表头配置）
 │   ├── api-config.html             # 步骤2：API Key 配置（多供应商）
 │   ├── field-mapper.html           # 步骤3：字段映射 + AI 智能映射
-│   ├── integrity-test.html         # 步骤4：完整性测试（可选）
+│   ├── integrity-test.html         # 步骤4：完整性测试 + 财务报表清洗 + 科目余额表核对
 │   └── query.html                  # 步骤5：自然语言查询分析
 │
 ├── static/                         # 静态资源
 │   ├── css/style.css
-│   └── js/app.js
+│   ├── js/app.js
+│   └── js/report-cleaner.js        # 财务报表清洗 + 核对前端逻辑
 │
 ├── electron/                       # Electron 桌面包装
 │   └── main.js
@@ -66,11 +71,14 @@ DA数据清洗业务AI应用/
 ## 三、5 步工作流
 
 ```
-[上传文件] → [API 配置] → [字段映射] → [完整性测试(可选)] → [查询分析]
-  步骤1         步骤2          步骤3           步骤4             步骤5
+[上传文件] → [API 配置] → [字段映射] → [完整性测试(可选)]  → [查询分析]
+  步骤1         步骤2          步骤3        ↓                    步骤5
+                                          [财务报表清洗]           
+                                          ↓                      
+                                          [科目余额表核对]         
 ```
 
-> 注：原流程中步骤 3（API 配置）和步骤 2（字段映射）已对调，使字段映射页可调用 AI 做智能映射。
+> 注：完整性测试、财务报表清洗、科目余额表核对均为可选步骤，集成在同一页面底部。
 
 ### 第 1 步：上传文件
 - 支持格式：`.xlsx`、`.xls`、`.csv`
@@ -102,9 +110,12 @@ DA数据清洗业务AI应用/
 - 后端保存映射到 session，导入数据到 DuckDB，计算 `mapped_fields` 和 `mapped_preview`
 - 支持历史映射匹配：`POST /api/mapping-history/match` 模糊匹配历史映射
 
-### 第 4 步：完整性测试（可选）
+### 第 4 步：完整性测试 + 财务报表清洗 + 科目余额表核对（全可选）
+
+#### 4a. 完整性测试
 - 基于 DuckDB SQL 的三项固化测试（非 Pandas）
 - 支持反结转模式（reverse_carry_forward）和末级科目模式（leaf_accounts）
+- 运行后在 DuckDB 创建 `balance_integrity` 快照表（快照在 `finally` 清理前完成，保留处理后的数据）
 - 结果可导出为 Excel：`POST /api/integrity-test/export`
 - **AI 引导式问答助手**：内置导向式决策树对话流程
   - AI 引导用户确认：ERP 系统、方向调整、反结转、末级科目、排除规则
@@ -112,6 +123,21 @@ DA数据清洗业务AI应用/
   - 支持对话中导出测试报告（PDF 格式的报告摘要 + Excel 文件下载）
   - 历史对话在重新导入数据时自动清除（`session.pop('integrity_chat_history')`）
   - 端点：`POST /integrity-chat`
+
+#### 4b. 财务报表清洗
+- 上传资产负债表/利润表（`.xlsx` / `.xls`），支持导入多张报表
+- **AI 读前 10 行**识别报表结构：报表类型、表头行数、数据起始行、列映射、左右分栏布局
+- **规则提取**：跳过汇总行/签名行/注释行/空行，处理左右分栏合并，数值清洗
+- 输出标准化列：项目名称 + 期末余额/年初余额（类型自适应）
+- 端点：`GET /report-cleaner`（重定向至 integrity-test 页面）
+
+#### 4c. 科目余额表核对
+- 将清洗后的报表与科目余额表（`balance_integrity` 快照或原始 `balance_data`）做逐项比对
+- **规则映射**：科目编号前缀 60+条 + 名称关键词 40+组 → 自动匹配科目到报表项目
+- **模糊匹配对齐**：规则输出标准名 → 模糊匹配到报表实际名称（去编号前缀、统一异体字）
+- **可编辑映射**：前端双栏界面，鼠标修改映射关系，点击刷新重新计算
+- **AI 差异分析**：将差异行 + 映射关系发给 AI，分析差异模式（映射调换/归属错误等）
+- 导出带差异标识的 Excel
 
 ### 第 5 步：查询分析
 - 用户输入自然语言 → 同义词扩展（本地词典 + AI 优化）→ `POST /api/generate-code` → AI 生成 DuckDB SQL
@@ -215,6 +241,67 @@ class AICodeGenerator:
 - 取科目编号为 `4103`（本年利润）**或**摘要同时包含"结转"和"损益"的记录
 - 使用原始 JE 金额（不调整方向）
 - 在 `_setup_carry_forward_views()` 中构建：`("科目编号" = '4103') OR ("摘要" LIKE '%结转%' AND "摘要" LIKE '%损益%')`
+
+
+### 4.5 ReportCleaner（`modules/report_cleaner.py`）— 财务报表清洗
+
+```python
+class ReportCleaner:
+    def __init__(self)
+    def load_file(self, filepath: str) -> list      # 加载 xlsx/xls，返回 sheet 列表
+    def preview_raw(self, sheet_name, nrows=10)      # 取前 N 行原始数据
+    def ai_detect(self, sheet_name, api_key, ...)    # AI 读前 10 行，识别报表结构
+    def extract_by_meta(self, sheet_name, meta)       # 规则引擎提取清洗数据
+    def export_to_excel(self, sheet_name, meta)       # 导出清洗后数据为 xlsx
+```
+
+**文件加载链路（`load_file`）:**
+```
+.xlsx → openpyxl（data_only 取公式计算值）
+.xls（后缀名错的 xlsx）→ 先 openpyxl → 失败回退 xlrd → 最后复制改后缀名重试
+```
+
+**AI 结构检测（`ai_detect`）:**
+- 读前 10 行原始数据，以文本格式发送给 AI
+- AI 返回结构化 JSON：report_type（balance_sheet / income_statement）、header_rows_count、data_start_row、layout_type（left_right_split / single_side）、columns（映射到标准字段）、skip_keywords
+- **零二次 AI 调用**：后续规则提取不依赖 AI
+
+**规则提取（`extract_by_meta`）:**
+- 跳过空行、汇总行（合计/总计/小计）、签名行（单位负责人/制表人）、注释行（注：）
+- 左右分栏布局 → 拆分为左右两行分别输出
+- 数值清洗（去逗号、空转空字符串、公式取缓存值）
+- 输出项目名称 + 期末余额/年初余额（资产负债表）或项目名称 + 期末余额（利润表，自动映射本年累计金额→期末余额）
+
+### 4.6 ReconciliationEngine（`modules/report_reconciliation.py`）— 科目余额表↔报表核对
+
+```python
+class ReconciliationEngine:
+    def __init__(self, db_cursor, balance_fields, balance_table='balance_data')
+    def get_balance_mappings(self, report_data, api_key=None)  # 返回映射数据供前端编辑
+    def reconcile_with_mappings(self, mappings, report_data)    # 按用户映射重新计算差异
+```
+
+**三层映射引擎：**
+
+1. **科目编号前缀匹配**（优先级最高，60+条规则）
+   - 标准 4 位前缀：`1001`→货币资金、`1122`→应收账款、`6602`→管理费用……
+   - 最长前缀优先匹配
+
+2. **科目名称关键词匹配**（编号无匹配时，40+组规则）
+   - 含"银行""现金"→货币资金、含"差旅费""办公费"→管理费用
+
+3. **模糊匹配对齐 `_match_to_actual()`**
+   - 规则输出标准名（如"应收账款"）→ 模糊匹配到报表实际名称（如"应收帐款"）
+   - 标准化预处理：去编号前缀（"一、营业收入"→"营业收入"）、统一异体字（帐→账）
+
+**AI 差异分析：**
+- 接收核对结果中的差异行 + 当前映射关系
+- 发送给 AI 分析差异模式：映射调换、归属错误、遗漏科目
+- 返回文本建议
+
+**数据源处理：**
+- 完整性测试运行后会自动创建 `balance_integrity` 快照表
+- 核对优先使用快照表（含反结转调整后的期末余额），兜底原始 `balance_data`
 
 ### 4.5 AI 完整性测试助手（`app.py` — `integrity_chat` 路由）
 
@@ -337,6 +424,8 @@ def expand_keywords(text: str) -> str
 | `review_model` | str | 复核模型名 |
 | `review_api_url` | str | 复核模型自定义 API 地址 |
 | `integrity_results` | dict | 完整性测试结果 |
+| `report_filepath` | str | 财务报表文件路径（临时会话） |
+| `balance_integrity` | table | (DuckDB) 完整性测试后快照的科目余额表，含反结转调整 |
 | `integrity_chat_history` | list | 问答助手的多轮对话历史（`[{role, content}]`） |
 | `last_execution_result` | dict | 上次查询执行结果 |
 | `query_history` | list | 查询历史记录 |
@@ -344,6 +433,219 @@ def expand_keywords(text: str) -> str
 | `mapping_history` | list | 字段映射历史 |
 
 ---
+
+## 六、完整数据流图
+
+### 6.1 全流程数据流
+
+```mermaid
+flowchart TB
+    subgraph 数据源["📂 数据源"]
+        A1[序时账 /xlsx,csv]
+        A2[科目余额表 /xlsx]
+        A3[资产负债表 /xlsx,xls]
+        A4[利润表 /xlsx,xls]
+    end
+
+    subgraph 导入层["📥 导入与映射"]
+        B1["DataProcessor<br/>加载Excel/CSV<br/>自动检测编码"]
+        B2["字段映射<br/>智能推荐+手动<br/>标准字段对齐"]
+        B3["DuckDB 导入<br/>data / balance_data<br/>借贷方自动计算余额"]
+    end
+
+    subgraph 测试与清洗层["🔍 测试与清洗"]
+        C1["完整性测试<br/>IntegrityChecker<br/>3项SQL固化测试"]
+        C2["反结转处理<br/>balance_adjusted<br/>扣除结转损益金额"]
+        C3["末级科目筛选<br/>balance_leaf<br/>窗口函数判断"]
+        C4["报表清洗<br/>ReportCleaner<br/>AI读10行+规则提取"]
+        C5["balance_integrity<br/>完整性快照表<br/>(处理后的数据)"]
+    end
+
+    subgraph 核对层["⚖️ 科目余额表核对"]
+        D1["ReconciliationEngine<br/>规则映射引擎"]
+        D2["编号前缀匹配<br/>60+规则"]
+        D3["名称关键词<br/>40+规则"]
+        D4["模糊匹配对齐<br/>报表实际名称"]
+        D5["AI兜底<br/>未匹配科目"]
+        D6["用户手动编辑<br/>双栏交互界面"]
+        D7["刷新核对<br/>差异计算"]
+        D8["AI差异分析<br/>映射调换/归属错误"]
+    end
+
+    subgraph 查询层["💬 自然语言查询"]
+        E1["同义词扩展<br/>synonym_dict.py"]
+        E2["AI SQL生成<br/>AICodeGenerator"]
+        E3["DuckDB 本地执行<br/>SELECT只读"]
+        E4["AI自动复核<br/>4维度审查"]
+        E5["结果导出<br/>CSV/Excel"]
+    end
+
+    subgraph 输出层["📤 输出"]
+        F1["完整性报告.xlsx"]
+        F2["清洗后报表.xlsx"]
+        F3["核对结果.xlsx"]
+        F4["查询结果.csv/xlsx"]
+    end
+
+    %% 数据流连接
+    A1 --> B1 --> B2 --> B3
+    A2 --> B1 --> B2 --> B3
+    B3 --> C1 --> C2 --> C3 --> C5
+    C1 --> C2 --> C5
+    C1 --> C3 --> C5
+    C1 --> C5
+    C5 -.->|核对使用| D1
+    
+    A3 --> C4
+    A4 --> C4
+    C4 -->|多报表合并| D1
+    
+    D1 --> D2 --> D4
+    D1 --> D3 --> D4
+    D4 --> D5 --> D6
+    D6 --> D7
+    D7 --> D8
+    
+    C5 -.->|原始兜底| D1
+    
+    B3 --> E3
+    E1 --> E2 --> E3 --> E4 --> E5
+    
+    C1 --> F1
+    C4 --> F2
+    D7 --> F3
+    E5 --> F4
+
+    classDef input fill:#e0f2fe,stroke:#075985
+    classDef process fill:#fef3c7,stroke:#92400e
+    classDef output fill:#f0fdf4,stroke:#166534
+    class A1,A2,A3,A4 input
+    class B1,B2,B3,C1,C2,C3,C4,C5,D1,D2,D3,D4,D5,D6,D7,D8,E1,E2,E3,E4,E5 process
+    class F1,F2,F3,F4 output
+```
+
+### 6.2 财务报表清洗流程
+
+```mermaid
+flowchart LR
+    subgraph 上传["上传"]
+        U1[选择文件<br/>xlsx/xls]
+        U2[选择Sheet]
+        U3[预览前10行]
+    end
+
+    subgraph 检测["AI检测"]
+        D1[发送前10行<br/>到AI API]
+        D2{AI返回<br/>结构化JSON}
+        D3[报表类型<br/>表头行数<br/>数据起始行<br/>列映射<br/>布局方式<br/>跳过关键词]
+    end
+
+    subgraph 提取["规则提取"]
+        E1[从数据起始行<br/>开始遍历]
+        E2{跳过判断}
+        E3[空行？→跳过]
+        E4[汇总行合计/总计？→跳过]
+        E5[签名行？→跳过]
+        E6[注释行？→跳过]
+        E7[大类标题行？→标记]
+        E8[左右分栏？→<br/>拆两行输出]
+        E9[数值清洗<br/>去逗号 NaN→空]
+    end
+
+    subgraph 输出["输出"]
+        O1[资产负债表<br/>项目名称+年初余额+期末余额]
+        O2[利润表<br/>项目名称+期末余额<br/>(自动映射本年累计)]
+        O3[导出Excel]
+    end
+
+    U1 --> U2 --> U3 --> D1 --> D2 --> D3
+    D3 --> E1 --> E2
+    E2 --> E3
+    E2 --> E4
+    E2 --> E5
+    E2 --> E6
+    E2 --> E7
+    E2 --> E8
+    E7 --> E9
+    E8 --> E9
+    E9 --> O1
+    E9 --> O2
+    O1 --> O3
+    O2 --> O3
+
+    classDef upload fill:#e0f2fe,stroke:#075985
+    classDef detect fill:#fef3c7,stroke:#92400e
+    classDef extract fill:#f3e8ff,stroke:#6d28d9
+    classDef output fill:#f0fdf4,stroke:#166534
+    class U1,U2,U3 upload
+    class D1,D2,D3 detect
+    class E1,E2,E3,E4,E5,E6,E7,E8,E9 extract
+    class O1,O2,O3 output
+```
+
+### 6.3 科目余额表核对流程
+
+```mermaid
+flowchart LR
+    subgraph 准备["数据准备"]
+        P1[科目余额表<br/>balance_integrity]
+        P2[清洗后报表数据<br/>多报表合并]
+    end
+
+    subgraph 映射["映射引擎<br/>ReconciliationEngine"]
+        M1{遍历科目<br/>余额表每行}
+        M2[编号前缀匹配<br/>60+规则]
+        M3[名称关键词匹配<br/>40+规则]
+        M4[模糊匹配对齐<br/>报表实际名称]
+        M5[AI兜底<br/>未匹配科目]
+        M6[用户手动编辑<br/>前端双栏界面]
+    end
+
+    subgraph 核对["逐项核对"]
+        R1[按报表项目<br/>汇总科目余额]
+        R2{与报表金额<br/>逐项比对}
+        R3[已匹配<br/>差异≈0]
+        R4[有差异<br/>|diff|>0.01]
+        R5[仅报表有<br/>report_only]
+        R6[未匹配科目<br/>unmatched]
+    end
+
+    subgraph 输出["输出"]
+        S1[核对结果表<br/>双栏展示]
+        S2[AI差异分析<br/>模式识别]
+        S3[导出Excel<br/>带差异高亮]
+    end
+
+    P1 --> M1
+    P2 --> R1
+    M1 --> M2
+    M1 --> M3
+    M2 --> M4
+    M3 --> M4
+    M4 --> M5
+    M5 --> M6
+    M6 --> R1
+    R1 --> R2
+    R2 --> R3
+    R2 --> R4
+    R2 --> R5
+    R2 --> R6
+    R3 --> S1
+    R4 --> S1
+    R5 --> S1
+    R6 --> S1
+    S1 --> S2
+    S1 --> S3
+
+    classDef prep fill:#e0f2fe,stroke:#075985
+    classDef map fill:#fef3c7,stroke:#92400e
+    classDef check fill:#f3e8ff,stroke:#6d28d9
+    classDef out fill:#f0fdf4,stroke:#166534
+    class P1,P2 prep
+    class M1,M2,M3,M4,M5,M6 map
+    class R1,R2,R3,R4,R5,R6 check
+    class S1,S2,S3 out
+```
 
 ## 六、关键 API 端点
 
@@ -375,6 +677,13 @@ def expand_keywords(text: str) -> str
 | POST | `/api/integrity-test/export` | 导出测试结果为 Excel（4 sheet） |
 | POST | `/integrity-chat` | 完整性测试 AI 引导问答（多轮对话，tool-calling 驱动） |
 | POST | `/api/integrity-test/ai-analyze` | AI 分析异常测试结果（审计视角） |
+| POST | `/api/report-upload` | 上传财务报表文件（xlsx/xls），返回 sheet 列表 |
+| POST | `/api/report-detect` | AI 识别报表结构（读前 10 行） |
+| POST | `/api/report-extract` | 规则提取清洗数据 |
+| POST | `/api/report-export` | 导出清洗后数据为 Excel |
+| POST | `/api/report-reconciliation` | 科目余额表核对（获取映射数据 / 刷新核算） |
+| POST | `/api/report-reconciliation/export` | 导出核对结果 Excel |
+| POST | `/api/report-reconciliation/ai-analyze` | AI 差异分析核对结果 |
 | GET | `/api/mapping-history/check` | 检查是否有匹配的历史映射 |
 | POST | `/api/mapping-history/apply` | 应用历史映射 |
 | GET | `/api/preset-rules/packs` | 获取规则包列表 |
