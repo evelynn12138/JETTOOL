@@ -399,7 +399,11 @@ def run_integrity_tests():
             return jsonify({'success': False, 'error': '序时账数据为空，请先上传并配置字段映射'})
 
         checker = IntegrityChecker(engine, journal_table=table_name, balance_table=balance_table)
-        results = checker.run_all(reverse_carry_forward=reverse_cf, leaf_accounts=leaf_accts)
+        results = checker.run_all(
+            reverse_carry_forward=reverse_cf,
+            leaf_accounts=leaf_accts,
+            balance_snapshot_table='balance_integrity',
+        )
 
         session['integrity_results'] = results
         session.modified = True
@@ -1765,6 +1769,471 @@ def query_page():
 #     if 'data_info' not in session:
 #         return redirect(url_for('upload_page'))
 #     return render_template('results.html')
+
+# ── 财务报表清洗路由 ──
+
+@app.route('/report-cleaner', methods=['GET'])
+def report_cleaner_page():
+    """财务报表清洗页面 - 已迁移至完整性测试页面"""
+    return redirect(url_for('integrity_test_page'))
+
+
+@app.route('/api/report-upload', methods=['POST'])
+def api_report_upload():
+    """上传报表文件并预览"""
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': '未选择文件'})
+
+    file = request.files['file']
+    if not file.filename:
+        return jsonify({'success': False, 'error': '文件名为空'})
+
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ('.xlsx', '.xls'):
+        return jsonify({'success': False, 'error': '仅支持 .xlsx 和 .xls 格式'})
+
+    try:
+        from modules.report_cleaner import ReportCleaner
+        fname = f"report_{int(time.time())}_{file.filename}"
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], fname)
+        file.save(filepath)
+
+        cleaner = ReportCleaner()
+        sheets = cleaner.load_file(filepath)
+
+        # 存 session
+        session['report_filepath'] = filepath
+        session.modified = True
+
+        return jsonify({
+            'success': True,
+            'filepath': filepath,
+            'filename': file.filename,
+            'sheets': sheets,
+        })
+    except Exception as e:
+        app.logger.error(f"[REPORT-UPLOAD] {e}")
+        return jsonify({'success': False, 'error': f'文件读取失败: {e}'})
+
+
+@app.route('/api/report-detect', methods=['POST'])
+def api_report_detect():
+    """AI 检测报表结构"""
+    data = request.get_json()
+    sheet_name = data.get('sheet_name', '')
+    filepath = session.get('report_filepath')
+
+    if not filepath or not os.path.exists(filepath):
+        return jsonify({'success': False, 'error': '请先上传文件'})
+
+    api_key = session.get('api_key')
+    if not api_key:
+        return jsonify({'success': False, 'error': '请先在「API 配置」中设置 API Key'})
+
+    plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
+
+    provider = session.get('ai_provider', 'deepseek')
+    model = session.get('ai_model')
+
+    try:
+        from modules.report_cleaner import ReportCleaner
+        cleaner = ReportCleaner()
+        cleaner.load_file(filepath)
+
+        meta = cleaner.ai_detect(sheet_name, plain_key, provider=provider, model=model)
+        return jsonify(meta)
+    except Exception as e:
+        app.logger.error(f"[REPORT-DETECT] {e}")
+        return jsonify({'success': False, 'error': f'AI 检测失败: {e}'})
+
+
+@app.route('/api/report-extract', methods=['POST'])
+def api_report_extract():
+    """规则提取清洗数据"""
+    data = request.get_json()
+    sheet_name = data.get('sheet_name', '')
+    detection_meta = data.get('detection_meta', {})
+    filepath = session.get('report_filepath')
+
+    if not filepath or not os.path.exists(filepath):
+        return jsonify({'success': False, 'error': '请先上传文件'})
+
+    try:
+        from modules.report_cleaner import ReportCleaner
+        cleaner = ReportCleaner()
+        cleaner.load_file(filepath)
+        result = cleaner.extract_by_meta(sheet_name, detection_meta)
+
+        if result.get('success'):
+            session['report_clean_data'] = result
+            session.modified = True
+
+        return jsonify(result)
+    except Exception as e:
+        app.logger.error(f"[REPORT-EXTRACT] {e}")
+        return jsonify({'success': False, 'error': f'提取失败: {e}'})
+
+
+@app.route('/api/report-export', methods=['POST'])
+def api_report_export():
+    """导出清洗后数据为 Excel"""
+    data = request.get_json()
+    sheet_name = data.get('sheet_name', '')
+    detection_meta = data.get('detection_meta', {})
+    filepath = session.get('report_filepath')
+
+    if not filepath or not os.path.exists(filepath):
+        return jsonify({'success': False, 'error': '请先上传文件'})
+
+    try:
+        from modules.report_cleaner import ReportCleaner
+        cleaner = ReportCleaner()
+        cleaner.load_file(filepath)
+        export_path = cleaner.export_to_excel(sheet_name, detection_meta)
+
+        return send_file(
+            export_path,
+            as_attachment=True,
+            download_name=f'报表清洗_{os.path.basename(filepath)}.xlsx',
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+    except Exception as e:
+        app.logger.error(f"[REPORT-EXPORT] {e}")
+        return jsonify({'success': False, 'error': f'导出失败: {e}'})
+
+@app.route('/api/report-reconciliation', methods=['POST'])
+def api_report_reconciliation():
+    """科目余额表 ↔ 报表期末余额核对"""
+    data = request.get_json()
+    sheet_name = data.get('sheet_name', '')
+    detection_meta = data.get('detection_meta', {})
+    filepath = session.get('report_filepath')
+
+    if not filepath or not os.path.exists(filepath):
+        return jsonify({'success': False, 'error': '请先上传文件'})
+
+    api_key = session.get('api_key')
+    plain_key = None
+    if api_key:
+        try:
+            plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
+        except Exception:
+            plain_key = api_key
+
+    provider = session.get('ai_provider', 'deepseek')
+    model = session.get('ai_model')
+
+    try:
+        from modules.report_reconciliation import ReconciliationEngine
+        from modules.report_cleaner import ReportCleaner
+
+        # 提取/合并清洗后的报表数据（支持多报表：前端直接传 report_data_list）
+        report_data_list = data.get('report_data_list')
+        if report_data_list and len(report_data_list) > 0:
+            # 前端已提取好，合并所有报表数据
+            combined_rows = []
+            for rd in report_data_list:
+                if rd.get('data'):
+                    combined_rows.extend(rd['data'])
+            report_data = {
+                'success': True,
+                'data': combined_rows,
+                'columns': report_data_list[0].get('columns', []),
+                'report_type': 'combined',
+                'row_count': len(combined_rows),
+            }
+        else:
+            # 旧逻辑：从文件提取
+            cleaner = ReportCleaner()
+            cleaner.load_file(filepath)
+            report_data = cleaner.extract_by_meta(sheet_name, detection_meta)
+            if not report_data.get("success"):
+                return jsonify(report_data)
+
+        # 科目余额表字段定义
+        balance_info = session.get('balance_data_info', {})
+        balance_fields = balance_info.get('mapped_fields', balance_info.get('fields', []))
+
+        # DuckDB 连接 — 优先用完整性测试快照，其次末级科目版，兜底原始数据
+        engine = get_duckdb_engine()
+        if engine.table_exists('balance_integrity'):
+            balance_table = 'balance_integrity'
+        elif engine.table_exists('balance_data'):
+            balance_table = 'balance_data'
+        else:
+            return jsonify({'success': False, 'error': '未找到科目余额表数据，请先导入科目余额表'})
+
+        cursor = engine._conn
+
+        # 调试：检查数据
+        debug_info = {}
+        try:
+            sample = cursor.execute(
+                f'SELECT * FROM "{balance_table}" LIMIT 3'
+            ).fetchall()
+            cols = [d[0] for d in cursor.description]
+            debug_info['table'] = balance_table
+            debug_info['columns'] = cols
+            debug_info['sample'] = [dict(zip(cols, r)) for r in sample]
+        except Exception as e:
+            debug_info['error'] = str(e)
+
+        reconciler = ReconciliationEngine(
+            db_cursor=cursor,
+            balance_fields=balance_fields,
+            balance_table=balance_table,
+        )
+
+        # 判断是初始映射还是刷新核对
+        mappings = data.get('mappings')
+        if mappings:
+            # 用户修改了映射 → 重新核对
+            result = reconciler.reconcile_with_mappings(mappings, report_data)
+        else:
+            # 初始调用 → 返回映射数据
+            result = reconciler.get_balance_mappings(
+                report_data,
+                api_key=plain_key,
+                provider=provider,
+                model=model,
+            )
+        # 把引擎实际使用的字段名也加到调试信息中
+        if isinstance(result, dict) and '_fields' in result:
+            debug_info['engine_fields'] = result.pop('_fields')
+        result['_debug'] = debug_info
+        return jsonify(result)
+
+    except Exception as e:
+        app.logger.error(f"[REPORT-RECONCILE] {e}")
+        return jsonify({'success': False, 'error': f'核对失败: {e}'})
+
+@app.route('/api/report-reconciliation/export', methods=['POST'])
+def api_report_reconciliation_export():
+    """导出核对结果到 Excel"""
+    data = request.get_json()
+    mappings = data.get('mappings', [])
+    sheet_name = data.get('sheet_name', '')
+    detection_meta = data.get('detection_meta', {})
+    filepath = session.get('report_filepath')
+
+    if not filepath or not os.path.exists(filepath):
+        return jsonify({'success': False, 'error': '请先上传文件'})
+
+    try:
+        from modules.report_reconciliation import ReconciliationEngine
+        from modules.report_cleaner import ReportCleaner
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+        # 提取/合并报表数据
+        report_data_list = data.get('report_data_list')
+        if report_data_list and len(report_data_list) > 0:
+            combined_rows = []
+            for rd in report_data_list:
+                if rd.get('data'):
+                    combined_rows.extend(rd['data'])
+            report_data = {
+                'success': True,
+                'data': combined_rows,
+                'columns': report_data_list[0].get('columns', []),
+                'report_type': 'combined',
+                'row_count': len(combined_rows),
+            }
+        else:
+            cleaner = ReportCleaner()
+            cleaner.load_file(filepath)
+            report_data = cleaner.extract_by_meta(sheet_name, detection_meta)
+            if not report_data.get("success"):
+                return jsonify(report_data)
+
+        # 执行核对
+        engine = get_duckdb_engine()
+        balance_info = session.get('balance_data_info', {})
+        balance_fields = balance_info.get('mapped_fields', balance_info.get('fields', []))
+        balance_table = 'balance_integrity' if engine.table_exists('balance_integrity') else 'balance_data'
+
+        reconciler = ReconciliationEngine(
+            db_cursor=engine._conn,
+            balance_fields=balance_fields,
+            balance_table=balance_table,
+        )
+        result = reconciler.reconcile_with_mappings(mappings, report_data)
+        if not result.get("success"):
+            return jsonify(result)
+
+        comparison = result.get("comparison", [])
+        stats = result.get("stats", {})
+
+        # 生成 Excel
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "核对结果"
+
+        hfont = Font(bold=True, size=11, color="FFFFFF")
+        hfill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        h_align = Alignment(horizontal="center", vertical="center")
+        bborder = Border(bottom=Side(style='thin', color='d9d9d9'))
+
+        # 标题行
+        ws.cell(row=1, column=1, value="科目余额表 ↔ 报表核对结果").font = Font(bold=True, size=14)
+        ws.merge_cells('A1:E1')
+        ws.cell(row=2, column=1, value=f"报表项目: {stats.get('total_items', 0)} | 已一致: {stats.get('matched', 0)} | 有差异: {stats.get('difference', 0)} | 匹配率: {stats.get('match_rate', 0)}%").font = Font(size=10, color='666666')
+        ws.merge_cells('A2:E2')
+
+        headers = ["报表项目", "报表金额", "余额表汇总", "差异", "匹配科目"]
+        for ci, h in enumerate(headers, 1):
+            cell = ws.cell(row=4, column=ci, value=h)
+            cell.font = hfont
+            cell.fill = hfill
+            cell.alignment = h_align
+
+        diff_fill = PatternFill(start_color="FFF0F0", end_color="FFF0F0", fill_type="solid")
+        row_idx = 5
+        for item in comparison:
+            is_diff = abs(item.get("diff", 0)) > 0.01
+            accounts = item.get("matched_accounts", [])
+            detail = "; ".join(f"{a.get('name','')}" for a in accounts[:10]) if accounts else ""
+            if item["match_type"] == "report_only":
+                detail = "仅报表有"
+            elif item["match_type"] == "unmatched":
+                detail = "未匹配科目"
+
+            vals = [
+                item.get("report_item", ""),
+                item.get("report_amount", 0),
+                item.get("balance_amount", 0),
+                round(item.get("diff", 0), 2),
+                detail,
+            ]
+            for ci, v in enumerate(vals, 1):
+                cell = ws.cell(row=row_idx, column=ci, value=v)
+                cell.border = bborder
+                if is_diff:
+                    cell.fill = diff_fill
+                if ci in (2, 3, 4) and isinstance(v, (int, float)):
+                    cell.number_format = '#,##0.00'
+            row_idx += 1
+
+        ws.column_dimensions['A'].width = 28
+        ws.column_dimensions['B'].width = 16
+        ws.column_dimensions['C'].width = 16
+        ws.column_dimensions['D'].width = 14
+        ws.column_dimensions['E'].width = 40
+
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".xlsx", prefix="reconcile_")
+        os.close(fd)
+        wb.save(path)
+
+        return send_file(
+            path,
+            as_attachment=True,
+            download_name="核对结果.xlsx",
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+    except Exception as e:
+        app.logger.error(f"[RECONCILE-EXPORT] {e}")
+        return jsonify({'success': False, 'error': f'导出失败: {e}'})
+
+@app.route('/api/report-reconciliation/ai-analyze', methods=['POST'])
+def api_report_reconciliation_ai_analyze():
+    """AI 差异分析：分析核对结果的差异模式并给出建议"""
+    data = request.get_json()
+    comparison = data.get('comparison', [])
+    mappings = data.get('mappings', [])
+
+    api_key = session.get('api_key')
+    if not api_key:
+        return jsonify({'success': False, 'error': '请先配置 API Key'})
+
+    try:
+        plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
+    except Exception as e:
+        app.logger.error(f"[RECONCILE-AI] 解密失败: {e}")
+        return jsonify({'success': False, 'error': f'API Key 解密失败，请重新配置: {e}'})
+
+    provider = session.get('ai_provider', 'deepseek')
+    model = session.get('ai_model')
+    import requests
+
+    cfg = Config.AI_PROVIDERS.get(provider, Config.AI_PROVIDERS["deepseek"])
+    url = cfg.get("api_url", Config.DEEPSEEK_API_URL)
+    model_name = model or cfg.get("model", Config.DEEPSEEK_MODEL)
+
+    # 构造差异数据
+    diff_lines = []
+    for c in comparison:
+        diff = abs(c.get("diff", 0))
+        if diff > 0.01:
+            accounts = c.get("matched_accounts", [])
+            acct_details = "; ".join(f"{a.get('code','')} {a.get('name','')}" for a in accounts[:5])
+            diff_lines.append(
+                f"- {c.get('report_item','')}: "
+                f"报表={c.get('report_amount',0):.2f}, "
+                f"余额表={c.get('balance_amount',0):.2f}, "
+                f"差异={c.get('diff',0):.2f}"
+                f"{'  匹配科目: ' + acct_details if acct_details else ''}"
+            )
+
+    # 科目映射样例
+    sample_mappings = mappings[:30]
+    map_lines = []
+    acct_groups = {}
+    for m in sample_mappings:
+        ri = m.get('report_item', '') or '(未映射)'
+        if ri not in acct_groups:
+            acct_groups[ri] = []
+        acct_groups[ri].append(f"{m.get('account_code','')} {m.get('account_name','')}")
+
+    for ri, accts in sorted(acct_groups.items()):
+        map_lines.append(f"  {ri}: {', '.join(accts[:8])}")
+
+    prompt = f"""你是一个审计数据核对专家。请分析以下科目余额表与财务报表的核对差异，找出可能的映射错误并提出建议。
+
+## 当前科目→报表映射关系（部分）
+{chr(10).join(map_lines)}
+
+## 存在差异的项目
+{chr(10).join(diff_lines) if diff_lines else '(无差异)'}
+
+## 要求
+请分析差异中是否存在以下模式，针对每种发现给出具体建议：
+
+1. **映射调换**: 两个项目的差异金额接近，可能是科目映射反了（如 A 科目应映射到 B 项目，B 科目应映射到 A 项目）
+2. **归属错误**: 某个科目的余额可能被归到了错误的报表项目下
+3. **遗漏科目**: 报表中有金额但余额表没有对应科目的项目
+4. **其他异常**: 你注意到的其他差异特征
+
+请用中文回答，每条建议需指明可能的科目和报表项目名称。
+"""
+
+    try:
+        resp = requests.post(url, headers={
+            "Authorization": f"Bearer {plain_key}",
+            "Content-Type": "application/json",
+        }, json={
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": "你是一个经验丰富的审计数据核对专家。"},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.2,
+            "max_tokens": 2000,
+        }, timeout=30)
+
+        if resp.status_code != 200:
+            err_detail = resp.text[:500]
+            app.logger.error(f"[RECONCILE-AI] API 错误 {resp.status_code}: {err_detail}")
+            return jsonify({'success': False, 'error': f'API 返回错误 ({resp.status_code}): {err_detail}'})
+
+        analysis = resp.json()['choices'][0]['message']['content']
+        return jsonify({'success': True, 'analysis': analysis})
+
+    except requests.exceptions.Timeout:
+        return jsonify({'success': False, 'error': 'API 请求超时'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'分析失败: {e}'})
+
 
 @app.route('/api/upload/preview', methods=['POST'])
 def upload_file_preview():

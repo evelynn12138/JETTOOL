@@ -977,13 +977,15 @@ class IntegrityChecker:
     # ========== 运行全部测试（增强：支持反结转 + 末级科目） ==========
 
     def run_all(self, reverse_carry_forward: bool = False,
-                leaf_accounts: bool = False) -> Dict[str, Any]:
+                leaf_accounts: bool = False,
+                balance_snapshot_table: str = None) -> Dict[str, Any]:
         """
         运行全部完整性测试。
 
         Args:
             reverse_carry_forward: 是否应用反结转（金蝶/用友模式）
             leaf_accounts: 是否仅用末级科目（从科目余额表中筛选末级科目）
+            balance_snapshot_table: 非空时，在清理前将最终科目余额表快照到该表名
         """
         orig_jt = self.journal_table
         orig_bt = self.balance_table
@@ -1024,6 +1026,26 @@ class IntegrityChecker:
                 'balance_test': self.test_balance_integrity(),
                 'cross_test': self.test_cross_validation()
             }
+            # 在 finally 清理之前，快照当前处理后的科目余额表
+            if balance_snapshot_table and self.balance_table:
+                try:
+                    # 先删除旧表确保干净，再重新从当前处理后的视图/表创建
+                    self.engine._conn.execute(
+                        f'DROP TABLE IF EXISTS "{balance_snapshot_table}"'
+                    )
+                    self.engine._conn.execute(
+                        f'CREATE TABLE "{balance_snapshot_table}" AS '
+                        f'SELECT * FROM "{self.balance_table}"'
+                    )
+                    import logging
+                    logging.getLogger('checker').info(
+                        f'[SNAPSHOT] 已从 {self.balance_table} 快照到 {balance_snapshot_table}'
+                    )
+                except Exception as e:
+                    import logging
+                    logging.getLogger('checker').warning(
+                        f'[SNAPSHOT] 快照失败: {e}'
+                    )
         finally:
             self.journal_table = orig_jt
             self.balance_table = orig_bt

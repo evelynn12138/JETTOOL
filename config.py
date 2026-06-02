@@ -13,7 +13,7 @@ class Config:
     MAX_CONTENT_LENGTH = 2048 * 1024 * 1024  # 2GB
     UPLOAD_FOLDER = 'temp'
     DUCKDB_DIR = 'temp/db'
-    ALLOWED_EXTENSIONS = {'xlsx', 'csv'}
+    ALLOWED_EXTENSIONS = {'xlsx', 'csv', 'xls'}
 
     # AI API配置
     DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
