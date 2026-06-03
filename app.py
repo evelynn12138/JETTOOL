@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, session, jsonify, send_file, url_for, redirect, Response
+from werkzeug.utils import secure_filename
 import os
 import time
 import uuid
@@ -1794,7 +1795,7 @@ def api_report_upload():
 
     try:
         from modules.report_cleaner import ReportCleaner
-        fname = f"report_{int(time.time())}_{file.filename}"
+        fname = f"report_{int(time.time())}_{secure_filename(file.filename)}"
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], fname)
         file.save(filepath)
 
@@ -1830,7 +1831,10 @@ def api_report_detect():
     if not api_key:
         return jsonify({'success': False, 'error': '请先在「API 配置」中设置 API Key'})
 
-    plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
+    try:
+        plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
+    except Exception:
+        return jsonify({'success': False, 'error': 'API Key 解密失败，请重新配置'})
 
     provider = session.get('ai_provider', 'deepseek')
     model = session.get('ai_model')
@@ -1889,10 +1893,10 @@ def api_report_export():
         from modules.report_cleaner import ReportCleaner
         cleaner = ReportCleaner()
         cleaner.load_file(filepath)
-        export_path = cleaner.export_to_excel(sheet_name, detection_meta)
+        export_data = cleaner.export_to_excel(sheet_name, detection_meta)
 
         return send_file(
-            export_path,
+            export_data,
             as_attachment=True,
             download_name=f'报表清洗_{os.path.basename(filepath)}.xlsx',
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -1918,7 +1922,7 @@ def api_report_reconciliation():
         try:
             plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
         except Exception:
-            plain_key = api_key
+            return jsonify({'success': False, 'error': 'API Key 解密失败，请重新配置'})
 
     provider = session.get('ai_provider', 'deepseek')
     model = session.get('ai_model')
@@ -2120,13 +2124,13 @@ def api_report_reconciliation_export():
         ws.column_dimensions['D'].width = 14
         ws.column_dimensions['E'].width = 40
 
-        import tempfile
-        fd, path = tempfile.mkstemp(suffix=".xlsx", prefix="reconcile_")
-        os.close(fd)
-        wb.save(path)
+        import io
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
 
         return send_file(
-            path,
+            buf,
             as_attachment=True,
             download_name="核对结果.xlsx",
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

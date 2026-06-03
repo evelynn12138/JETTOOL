@@ -282,7 +282,7 @@ class ReconciliationEngine:
         for item_name, group in grouped.items():
             report_amount = 0
             for rrow in report_rows:
-                rname = rrow.get("项目名称", "") or (list(rrow.values())[0] if rrow else "")
+                rname = rrow["项目名称"] if "项目名称" in rrow else (list(rrow.values())[0] if rrow else "")
                 if rname == item_name:
                     report_amount = self._parse_report_amount(rrow)
                     break
@@ -314,7 +314,7 @@ class ReconciliationEngine:
         # 反向：报表有但余额表没映射到的
         mapped_names = {c["report_item"] for c in comparison if c["report_item"] != "(未匹配科目)"}
         for rrow in report_rows:
-            rname = rrow.get("项目名称", "") or (list(rrow.values())[0] if rrow else "")
+            rname = rrow["项目名称"] if "项目名称" in rrow else (list(rrow.values())[0] if rrow else "")
             if rname and rname not in mapped_names:
                 rval = self._parse_report_amount(rrow)
                 comparison.append({
@@ -371,7 +371,7 @@ class ReconciliationEngine:
         """提取报表项目名称列表"""
         items = []
         for r in report_rows:
-            name = r.get("项目名称", "") or (list(r.values())[0] if r else "")
+            name = r["项目名称"] if "项目名称" in r else (list(r.values())[0] if r else "")
             if name:
                 items.append(name)
         return items
@@ -498,7 +498,7 @@ class ReconciliationEngine:
             return json_module.loads(text)
         except json_module.JSONDecodeError:
             pass
-        m = re.search(r'\[.*\]', text, re.DOTALL)
+        m = re.search(r'\[[^\[\]]*\]', text, re.DOTALL)
         if m:
             try:
                 return json_module.loads(m.group(0))
@@ -534,7 +534,7 @@ class ReconciliationEngine:
     def _calc_stats(self, comparison: list) -> dict:
         total_items = len(comparison)
         matched = sum(1 for c in comparison if c["match_type"] == "mapped" and abs(c["diff"]) <= 0.01)
-        difference = sum(1 for c in comparison if abs(c["diff"]) > 0.01)
+        difference = sum(1 for c in comparison if c["match_type"] == "mapped" and abs(c["diff"]) > 0.01)
         return {
             "total_items": total_items,
             "matched": matched,

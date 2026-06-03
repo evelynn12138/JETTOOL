@@ -80,47 +80,50 @@ class ReportCleaner:
 
     def _load_with_openpyxl(self, filepath: str) -> bool:
         """用 openpyxl 加载"""
+        wb = None
+        wb_data = None
         try:
             from openpyxl import load_workbook
             wb = load_workbook(filepath, read_only=True)
             wb_data = load_workbook(filepath, data_only=True, read_only=True)
-            self._raw_book = wb_data
         except Exception:
+            if wb: wb.close()
+            if wb_data: wb_data.close()
             return False
 
-        self._sheets = {}
-        for name in wb.sheetnames:
-            ws = wb[name]
-            rows = []
-            max_col = 0
-            for row in ws.iter_rows(values_only=True):
-                r = [str(c) if c is not None else '' for c in row]
-                max_col = max(max_col, len(r))
-                rows.append(r)
-            self._sheets[name] = {
-                'rows': rows,
-                'total_rows': len(rows),
-                'total_cols': max_col,
-            }
-            # 用 data_only 模式取公式计算值
-            if wb_data:
-                try:
-                    d_ws = wb_data[name]
-                    d_rows = []
-                    for row in d_ws.iter_rows(values_only=True):
-                        d_rows.append([str(c) if c is not None else '' for c in row])
-                    # 替换 formula 行的值
-                    for ri in range(min(len(d_rows), len(rows))):
-                        for ci in range(min(len(d_rows[ri]), len(rows[ri]))):
-                            if d_rows[ri][ci] and d_rows[ri][ci] != 'None':
-                                self._sheets[name]['rows'][ri][ci] = d_rows[ri][ci]
-                except Exception:
-                    pass
-
-        wb.close()
-        if wb_data:
-            wb_data.close()
-        return True
+        try:
+            self._sheets = {}
+            for name in wb.sheetnames:
+                ws = wb[name]
+                rows = []
+                max_col = 0
+                for row in ws.iter_rows(values_only=True):
+                    r = [str(c) if c is not None else '' for c in row]
+                    max_col = max(max_col, len(r))
+                    rows.append(r)
+                self._sheets[name] = {
+                    'rows': rows,
+                    'total_rows': len(rows),
+                    'total_cols': max_col,
+                }
+                # 用 data_only 模式取公式计算值
+                if wb_data:
+                    try:
+                        d_ws = wb_data[name]
+                        d_rows = []
+                        for row in d_ws.iter_rows(values_only=True):
+                            d_rows.append([str(c) if c is not None else '' for c in row])
+                        # 替换 formula 行的值
+                        for ri in range(min(len(d_rows), len(rows))):
+                            for ci in range(min(len(d_rows[ri]), len(rows[ri]))):
+                                if d_rows[ri][ci] and d_rows[ri][ci] != 'None':
+                                    self._sheets[name]['rows'][ri][ci] = d_rows[ri][ci]
+                    except Exception:
+                        pass
+            return True
+        finally:
+            if wb: wb.close()
+            if wb_data: wb_data.close()
 
     def _load_with_xlrd(self, filepath: str) -> bool:
         """用 xlrd 加载 .xls"""
@@ -296,7 +299,7 @@ class ReportCleaner:
                 pass
 
         # 尝试匹配第一个 { 到最后一个 }
-        m = re.search(r'\{.*\}', text, re.DOTALL)
+        m = re.search(r'\{[^{}]*\}', text, re.DOTALL)
         if m:
             try:
                 return json_module.loads(m.group(0))
@@ -620,14 +623,16 @@ class ReportCleaner:
             "项目名称": 32, "行次": 8, "期末余额": 18, "年初余额": 18,
             "本月金额": 18, "本年累计金额": 18, "上年同期累计数": 18, "报表侧": 20,
         }
+        from openpyxl.utils import get_column_letter
         for ci, h in enumerate(columns, 1):
-            ws.column_dimensions[chr(64 + ci)].width = col_widths.get(h, 14)
+            ws.column_dimensions[get_column_letter(ci)].width = col_widths.get(h, 14)
 
         if filepath:
             wb.save(filepath)
             return filepath
 
-        fd, path = tempfile.mkstemp(suffix=".xlsx", prefix="report_clean_")
-        os.close(fd)
-        wb.save(path)
-        return path
+        import io
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf

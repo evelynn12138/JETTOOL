@@ -195,6 +195,12 @@
                     <div class="error-box" id="upload-error" style="display:none;"></div>
                 </div>
 
+                <div style="border-top:2px dashed #e2e8f0;margin:24px 0 20px;"></div>
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+                    <span style="background:var(--black);color:var(--yellow);width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;">2</span>
+                    <span style="font-size:15px;font-weight:600;color:var(--black);">AI 检测结果</span>
+                    <span style="font-size:13px;color:var(--secondary-color);">— 确认结构无误后提取数据</span>
+                </div>
                 <!-- 卡片2: AI检测 -->
                 <div id="card-detection" style="display:none;">
                     <div class="detection-grid" id="detection-grid"></div>
@@ -215,6 +221,12 @@
                     </div>
                 </div>
 
+                <div style="border-top:2px dashed #e2e8f0;margin:24px 0 20px;"></div>
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+                    <span style="background:var(--black);color:var(--yellow);width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;">3</span>
+                    <span style="font-size:15px;font-weight:600;color:var(--black);">清洗结果预览</span>
+                    <span style="font-size:13px;color:var(--secondary-color);">— 导出或进行科目余额表核对</span>
+                </div>
                 <!-- 卡片3: 结果预览 -->
                 <div id="card-results" style="display:none;">
                     <div class="stats-row" id="results-stats"></div>
@@ -233,6 +245,12 @@
                     </div>
                 </div>
 
+                <div style="border-top:2px dashed #e2e8f0;margin:24px 0 20px;"></div>
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+                    <span style="background:var(--black);color:var(--yellow);width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;">4</span>
+                    <span style="font-size:15px;font-weight:600;color:var(--black);">科目余额表核对</span>
+                    <span style="font-size:13px;color:var(--secondary-color);">— 编辑映射关系后点击刷新</span>
+                </div>
                 <!-- 卡片4: 核对科目余额表 -->
                 <div id="card-reconcile" style="display:none;">
                     <datalist id="reconcile-item-datalist"></datalist>
@@ -243,26 +261,29 @@
 
                     <div id="reconcile-container" style="display:none;">
                         <!-- 工具栏 -->
-                        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap;padding:12px 16px;background:#f8f9fa;border-radius:8px;border:1px solid #e2e8f0;">
                             <i class="fas fa-building" style="color:var(--secondary-color);"></i>
-                            <span style="font-size:14px;color:var(--secondary-color);">公司筛选:</span>
-                            <select id="reconcile-company-filter" style="padding:6px 12px;font-size:14px;border:1px solid #cbd5e1;border-radius:6px;background:white;min-width:160px;">
+                            <span style="font-size:13px;color:var(--secondary-color);font-weight:500;">公司:</span>
+                            <select id="reconcile-company-filter" style="padding:5px 10px;font-size:13px;border:1px solid #d1d5db;border-radius:5px;background:white;min-width:150px;">
                                 <option value="">全部</option>
                             </select>
-                            <button class="btn btn-primary" id="reconcile-refresh-btn">
+                            <span style="width:1px;height:24px;background:#d1d5db;margin:0 4px;"></span>
+                            <button class="btn btn-primary" id="reconcile-refresh-btn" style="padding:6px 14px;font-size:13px;">
                                 <i class="fas fa-sync"></i> 刷新核对
                             </button>
-                            <button class="btn btn-primary" id="reconcile-ai-btn" style="background:var(--yellow);color:var(--black);border:none;">
+                            <span style="width:1px;height:24px;background:#d1d5db;margin:0 4px;"></span>
+                            <button class="btn" id="reconcile-ai-btn" style="padding:6px 14px;font-size:13px;background:var(--yellow);color:var(--black);border:none;border-radius:5px;cursor:pointer;">
                                 <i class="fas fa-robot"></i> AI 差异分析
                             </button>
-                            <button class="btn btn-success" id="reconcile-export-btn">
-                                <i class="fas fa-file-excel"></i> 导出
+                            <button class="btn btn-success" id="reconcile-export-btn" style="padding:6px 14px;font-size:13px;">
+                                <i class="fas fa-file-excel"></i> 导出结果
                             </button>
-                            <button class="btn btn-secondary" id="reconcile-back-btn">
-                                <i class="fas fa-arrow-left"></i> 返回预览
+                            <span style="width:1px;height:24px;background:#d1d5db;margin:0 4px;"></span>
+                            <button class="btn btn-secondary" id="reconcile-back-btn" style="padding:6px 14px;font-size:13px;">
+                                <i class="fas fa-arrow-left"></i> 返回
                             </button>
-                            <span style="margin-left:auto;font-size:13px;color:var(--secondary-color);">
-                                <i class="fas fa-edit"></i> 双击报表科目名称单元格可直接编辑
+                            <span style="margin-left:auto;font-size:12px;color:#9ca3af;">
+                                <i class="fas fa-edit"></i> 双击可编辑报表科目名称
                             </span>
                         </div>
 
@@ -270,13 +291,20 @@
                         <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;">
                             <!-- 左栏: 科目余额表 -->
                             <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
-                                <div style="background:var(--black);color:var(--yellow);padding:10px 14px;font-weight:600;font-size:14px;">
-                                    <i class="fas fa-list"></i> 科目余额表 <span id="reconcile-row-count" style="font-weight:normal;font-size:12px;color:rgba(255,231,0,0.7);"></span>
+                                <div style="background:var(--black);color:var(--yellow);padding:10px 14px;font-weight:600;font-size:14px;display:flex;align-items:center;gap:10px;">
+                                    <span><i class="fas fa-list"></i> 科目余额表 <span id="reconcile-row-count" style="font-weight:normal;font-size:12px;color:rgba(255,231,0,0.7);"></span></span>
+                                    <span style="margin-left:auto;display:none;align-items:center;gap:6px;" id="batch-edit-bar">
+                                        <span id="batch-selected-count" style="font-size:12px;color:rgba(255,231,0,0.8);font-weight:normal;"></span>
+                                        <input type="text" id="batch-item-input" list="reconcile-item-datalist" placeholder="统一设为..." style="padding:3px 8px;font-size:12px;border:1px solid rgba(255,231,0,0.3);border-radius:4px;background:rgba(255,231,0,0.1);color:white;width:140px;">
+                                        <button id="batch-apply-btn" style="padding:3px 10px;font-size:12px;background:var(--yellow);color:var(--black);border:none;border-radius:4px;cursor:pointer;font-weight:600;">应用</button>
+                                        <button id="batch-cancel-btn" style="padding:3px 8px;font-size:12px;background:transparent;color:rgba(255,231,0,0.7);border:1px solid rgba(255,231,0,0.3);border-radius:4px;cursor:pointer;">取消</button>
+                                    </span>
                                 </div>
                                 <div style="max-height:520px;overflow-y:auto;">
                                     <table class="preview-table" id="reconcile-balance-table">
                                         <thead>
                                             <tr>
+                                                <th style="width:32px;"><input type="checkbox" id="reconcile-select-all" style="cursor:pointer;"></th>
                                                 <th style="min-width:60px;">科目编号</th>
                                                 <th style="min-width:100px;">科目名称</th>
                                                 <th style="min-width:80px;">期末余额</th>

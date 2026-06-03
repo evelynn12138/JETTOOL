@@ -59,6 +59,12 @@
     const reconcileExportBtn = $('reconcile-export-btn');
     const reconcileBalanceBody = $('reconcile-balance-body');
     const reconcileResultBody = $('reconcile-result-body');
+    const reconcileSelectAll = $('reconcile-select-all');
+    const batchEditBar = $('batch-edit-bar');
+    const batchSelectedCount = $('batch-selected-count');
+    const batchItemInput = $('batch-item-input');
+    const batchApplyBtn = $('batch-apply-btn');
+    const batchCancelBtn = $('batch-cancel-btn');
     const reconcileRowCount = $('reconcile-row-count');
     const reconcileStatsLabel = $('reconcile-stats-label');
     const reconcileError = $('reconcile-error');
@@ -109,7 +115,7 @@
             html += `<div style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:13px;">
                 <span style="color:#166534;">✓</span>
                 <span style="font-weight:600;">${typeLabels[r.reportType] || r.reportType}</span>
-                <span style="color:var(--secondary-color);">${r.filename}</span>
+                <span style="color:var(--secondary-color);">${escapeHtml(r.filename)}</span>
                 <span style="color:var(--secondary-color);font-size:12px;">(${r.row_count} 行)</span>
             </div>`;
         });
@@ -246,7 +252,7 @@
         detectionGrid.innerHTML = `
             <div class="detection-item">
                 <div class="label">报表类型</div>
-                <div class="value">${labels[meta.report_type] || meta.report_type}</div>
+                <div class="value">${labels[meta.report_type] || escapeHtml(meta.report_type)}</div>
             </div>
             <div class="detection-item">
                 <div class="label">布局方式</div>
@@ -266,7 +272,7 @@
             detectionGrid.insertAdjacentHTML('beforeend', `
                 <div class="detection-item" style="border-left-color:var(--secondary-color);">
                     <div class="label">公司名称</div>
-                    <div class="value">${meta.company_name}</div>
+                    <div class="value">${escapeHtml(meta.company_name)}</div>
                 </div>
             `);
         }
@@ -274,7 +280,7 @@
             detectionGrid.insertAdjacentHTML('beforeend', `
                 <div class="detection-item" style="border-left-color:var(--secondary-color);">
                     <div class="label">报表期间</div>
-                    <div class="value">${meta.report_period}</div>
+                    <div class="value">${escapeHtml(meta.report_period)}</div>
                 </div>
             `);
         }
@@ -299,7 +305,7 @@
             badge.className = 'col-badge';
             badge.innerHTML = `
                 <span class="col-idx">[${c.index}]</span>
-                ${c.name}
+                ${escapeHtml(c.name)}
                 <span style="font-weight:normal;color:white;">→</span>
                 ${stdNames[c.standard_field] || c.standard_field}
                 <span class="col-side">${sideNames[c.side] || ''}</span>
@@ -379,11 +385,11 @@
 
         if (data.report_period) {
             resultsStats.insertAdjacentHTML('beforeend',
-                `<span class="stat-badge" style="background:#e0f2fe;color:#075985;">期间: ${data.report_period}</span>`);
+                `<span class="stat-badge" style="background:#e0f2fe;color:#075985;">期间: ${escapeHtml(data.report_period)}</span>`);
         }
         if (data.company_name) {
             resultsStats.insertAdjacentHTML('beforeend',
-                `<span class="stat-badge" style="background:#e0f2fe;color:#075985;">${data.company_name}</span>`);
+                `<span class="stat-badge" style="background:#e0f2fe;color:#075985;">${escapeHtml(data.company_name)}</span>`);
         }
 
         // 已导入报表列表（多报表支持）
@@ -403,7 +409,7 @@
             columns.forEach(c => {
                 let val = row[c];
                 if (val === '' || val === null || val === undefined) val = '';
-                html += `<td>${val}</td>`;
+                html += `<td>${escapeHtml(String(val))}</td>`;
             });
             html += '</tr>';
         });
@@ -434,7 +440,7 @@
             html += `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #e5e7eb;">
                 <span style="background:#166534;color:white;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;">${i+1}</span>
                 <span style="font-weight:600;">${typeLabels[r.reportType] || r.reportType}</span>
-                <span style="color:var(--secondary-color);font-size:13px;">${r.filename}</span>
+                <span style="color:var(--secondary-color);font-size:13px;">${escapeHtml(r.filename)}</span>
                 <span style="color:var(--secondary-color);font-size:12px;">${r.row_count} 行</span>
             </div>`;
         });
@@ -570,7 +576,7 @@
         reconcileRowCount.textContent = `(${rows.length} 行)`;
 
         if (rows.length === 0) {
-            reconcileBalanceBody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--secondary-color);">无数据</td></tr>';
+            reconcileBalanceBody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--secondary-color);">无数据</td></tr>';
             return;
         }
 
@@ -612,6 +618,9 @@
 
             const idx = rowIndex++;
             html += `<tr${rowStyle ? ' style="' + rowStyle + '"' : ''}>
+                <td style="text-align:center;padding:4px;">
+                    <input type="checkbox" class="reconcile-row-checkbox" data-idx="${idx}" style="cursor:pointer;">
+                </td>
                 <td style="font-size:12px;${textColor}">${escapeHtml(r.account_code || '')}</td>
                 <td style="${textColor}">${escapeHtml(r.account_name || '')}</td>
                 <td style="text-align:right;${textColor}">${amt}</td>
@@ -636,12 +645,78 @@
                 if (rows[idx]) {
                     rows[idx].report_item = this.value;
                 }
-                // 更新边框颜色
-                this.style.borderColor = this.value.trim() ? '#bbf7d0' : '#fecaca';
-                this.style.background = this.value.trim() ? '#f0fdf4' : '#fef2f2';
+                const isNowMapped = !!this.value.trim();
+                // 更新行背景和文字颜色（实时反映映射状态）
+                const tr = this.closest('tr');
+                if (tr) {
+                    tr.style.background = isNowMapped ? '' : '#fef2f2';
+                    const cells = tr.querySelectorAll('td');
+                    cells.forEach((td, i) => {
+                        if (i >= 1 && i <= 3) { // 编号、名称、余额三列
+                            td.style.color = isNowMapped ? '' : '#991b1b';
+                        }
+                    });
+                }
+                this.style.borderColor = isNowMapped ? '#bbf7d0' : '#fecaca';
+                this.style.background = isNowMapped ? '#f0fdf4' : '#fef2f2';
             });
         });
+
+        // 复选框：选中状态变化时更新批量编辑栏
+        const checkboxes = reconcileBalanceBody.querySelectorAll('.reconcile-row-checkbox');
+        checkboxes.forEach(cb => {
+            cb.addEventListener('change', updateBatchBar);
+        });
     }
+
+    // 全选复选框
+    if (reconcileSelectAll) {
+        reconcileSelectAll.addEventListener('change', function() {
+            const checked = this.checked;
+            reconcileBalanceBody.querySelectorAll('.reconcile-row-checkbox').forEach(cb => {
+                cb.checked = checked;
+            });
+            updateBatchBar();
+        });
+    }
+
+    function updateBatchBar() {
+        const checked = reconcileBalanceBody.querySelectorAll('.reconcile-row-checkbox:checked');
+        const count = checked.length;
+        if (count > 0) {
+            batchEditBar.style.display = 'flex';
+            batchSelectedCount.textContent = `已选 ${count} 行`;
+        } else {
+            batchEditBar.style.display = 'none';
+            if (reconcileSelectAll) reconcileSelectAll.checked = false;
+        }
+    }
+
+    // 批量应用
+    batchApplyBtn.addEventListener('click', function() {
+        const val = batchItemInput.value.trim();
+        if (!val) return;
+        const checked = reconcileBalanceBody.querySelectorAll('.reconcile-row-checkbox:checked');
+        const filter = reconcileCompanyFilter.value;
+        const rows = filter ? reconcileState.balanceRows.filter(r => r.company === filter) : reconcileState.balanceRows;
+        checked.forEach(cb => {
+            const idx = parseInt(cb.dataset.idx);
+            if (rows[idx]) {
+                rows[idx].report_item = val;
+            }
+        });
+        // 刷新左栏
+        renderBalanceTable();
+    });
+
+    // 批量取消
+    batchCancelBtn.addEventListener('click', function() {
+        batchItemInput.value = '';
+        reconcileBalanceBody.querySelectorAll('.reconcile-row-checkbox:checked').forEach(cb => {
+            cb.checked = false;
+        });
+        updateBatchBar();
+    });
 
     async function refreshReconcile() {
         // 收集当前全部映射
