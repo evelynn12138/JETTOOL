@@ -199,6 +199,63 @@
                     </div>
                 </div>
 
+                <!-- Dify 代理配置（可选） -->
+                <div class="review-config-section">
+                    <div class="review-config-header" id="dify-config-toggle">
+                        <h4><i class="fas fa-cloud"></i> Dify AI 代理配置 <span class="review-badge">推荐</span></h4>
+                        <span class="review-toggle-icon" id="dify-toggle-icon">
+                            <i class="fas fa-chevron-right"></i>
+                        </span>
+                    </div>
+                    <div class="review-config-body" id="dify-config-body" style="display: none;">
+                        <p class="config-description" style="margin-bottom: 16px;">
+                            配置 Dify Workflow 作为 AI 代理层，将覆盖除完整性测试助手外的所有 AI 调用（SQL 生成、字段映射、报表识别等）。
+                            Dify 端已配置模型 Qwen3-30B-A3B（temperature=0.7, max_tokens=4096）。
+                        </p>
+
+                        <div class="form-group">
+                            <label for="dify-base-url">
+                                <i class="fas fa-link"></i> Dify API 地址
+                            </label>
+                            <input type="text" id="dify-base-url"
+                                   placeholder="{{ '{{ config.DIFY_BASE_URL }}' }}"
+                                   class="api-input">
+                            <p class="form-hint">
+                                Dify 实例的 API 地址，例如 https://ai-platform-uat.ey.net/v1
+                            </p>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="dify-api-key">
+                                <i class="fas fa-key"></i> Dify Workflow API Key
+                            </label>
+                            <div class="input-with-button">
+                                <input type="password" id="dify-api-key" placeholder="app-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" class="api-input">
+                                <button class="btn btn-small" id="dify-toggle-visibility">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </div>
+                            <p class="form-hint">
+                                在 Dify 工作流的「API 访问」页面获取 API Key
+                            </p>
+                        </div>
+
+                        <div class="form-group">
+                            <label>
+                                <i class="fas fa-vial"></i> 测试 Dify 连接
+                            </label>
+                            <div class="test-area">
+                                <button class="btn btn-small" id="test-dify-btn">
+                                    <i class="fas fa-play"></i> 测试连接
+                                </button>
+                            </div>
+                            <div class="test-result" id="dify-test-result" style="display: none;">
+                                <div class="test-status" id="dify-test-status"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="action-buttons">
                     <button class="btn btn-secondary" onclick="window.location.href='{{ url_for('upload_page') }}'">
                         <i class="fas fa-arrow-left"></i> 返回上一步
@@ -505,8 +562,95 @@
             }
         });
 
-        // ====== 保存并继续 ======
-        saveApiBtn.addEventListener('click', async () => {
+        // ====== Dify 配置展开/收起 ======
+        const difyToggle = document.getElementById('dify-config-toggle');
+        const difyConfigBody = document.getElementById('dify-config-body');
+        const difyToggleIcon = document.getElementById('dify-toggle-icon');
+        const difyBaseUrl = document.getElementById('dify-base-url');
+        const difyApiKey = document.getElementById('dify-api-key');
+        const difyTestResult = document.getElementById('dify-test-result');
+        const difyTestStatus = document.getElementById('dify-test-status');
+        const difyTestBtn = document.getElementById('test-dify-btn');
+        const difyToggleVisBtn = document.getElementById('dify-toggle-visibility');
+
+        let difyConfigExpanded = false;
+        difyToggle.addEventListener('click', () => {
+            difyConfigExpanded = !difyConfigExpanded;
+            difyConfigBody.style.display = difyConfigExpanded ? 'block' : 'none';
+            const icon = difyToggleIcon.querySelector('i');
+            if (icon) icon.className = 'fas fa-chevron-' + (difyConfigExpanded ? 'down' : 'right');
+        });
+
+        // 切换 Dify API Key 可见性
+        let difyIsVisible = false;
+        difyToggleVisBtn.addEventListener('click', () => {
+            difyIsVisible = !difyIsVisible;
+            difyApiKey.type = difyIsVisible ? 'text' : 'password';
+            difyToggleVisBtn.innerHTML = difyIsVisible
+                ? '<i class="fas fa-eye-slash"></i>'
+                : '<i class="fas fa-eye"></i>';
+        });
+
+        // 加载已保存的 Dify 配置
+        async function loadDifyConfig() {
+            try {
+                const res = await fetch('/api/dify-status');
+                const data = await res.json();
+                if (data.success && data.configured) {
+                    difyBaseUrl.value = data.base_url || '';
+                    difyConfigExpanded = true;
+                    difyConfigBody.style.display = 'block';
+                    difyToggleIcon.querySelector('i').className = 'fas fa-chevron-down';
+                }
+            } catch (e) {
+                // 静默失败
+            }
+        }
+
+        // 测试 Dify 连接
+        difyTestBtn.addEventListener('click', async () => {
+            const baseUrl = difyBaseUrl.value.trim();
+            const apiKey = difyApiKey.value.trim();
+
+            if (!baseUrl) {
+                difyTestStatus.innerHTML = '<div class="status-error"><i class="fas fa-times-circle"></i> 请输入 Dify API 地址</div>';
+                difyTestResult.style.display = 'block';
+                return;
+            }
+            if (!apiKey) {
+                difyTestStatus.innerHTML = '<div class="status-error"><i class="fas fa-times-circle"></i> 请输入 Dify API Key</div>';
+                difyTestResult.style.display = 'block';
+                return;
+            }
+
+            difyTestBtn.disabled = true;
+            difyTestBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 测试中...';
+
+            try {
+                const res = await fetch('/api/configure-dify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ base_url: baseUrl, api_key: apiKey })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    difyTestStatus.innerHTML = '<div class="status-success"><i class="fas fa-check-circle"></i> 连接成功！' +
+                        (data.warning ? '<br><small style="color:#9a3412">' + data.warning + '</small>' : '') +
+                        '</div>';
+                } else {
+                    difyTestStatus.innerHTML = '<div class="status-error"><i class="fas fa-times-circle"></i> ' + data.error + '</div>';
+                }
+            } catch (error) {
+                difyTestStatus.innerHTML = '<div class="status-error"><i class="fas fa-times-circle"></i> 请求失败: ' + error.message + '</div>';
+            } finally {
+                difyTestResult.style.display = 'block';
+                difyTestBtn.disabled = false;
+                difyTestBtn.innerHTML = '<i class="fas fa-play"></i> 测试连接';
+            }
+        });
+
+        // 修改保存按钮：保存传统 API 配置 + Dify 配置
+        saveApiBtn.addEventListener('click', async function(e) {
             const provider = providerSelect.value;
 
             if (!provider) {
@@ -514,7 +658,6 @@
                 return;
             }
 
-            // 非预配置服务商需要检查 API Key
             if (!preConfiguredIds.has(provider) && !apiKeyInput.value.trim()) {
                 alert('请输入API Key');
                 return;
@@ -523,18 +666,29 @@
             loadingOverlay.style.display = 'flex';
 
             try {
-                const response = await fetch('/api/configure-api', {
+                // 1. 保存传统 API 配置
+                const apiRes = await fetch('/api/configure-api', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(getSavePayload())
                 });
-                const result = await response.json();
-
-                if (result.success) {
-                    window.location.href = '/field-mapper';
-                } else {
-                    alert('保存失败: ' + result.error);
+                const apiResult = await apiRes.json();
+                if (!apiResult.success) {
+                    throw new Error(apiResult.error);
                 }
+
+                // 2. 如果有 Dify 配置，也保存
+                const difyUrl = difyBaseUrl.value.trim();
+                const difyKey = difyApiKey.value.trim();
+                if (difyUrl && difyKey) {
+                    await fetch('/api/configure-dify', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ base_url: difyUrl, api_key: difyKey })
+                    });
+                }
+
+                window.location.href = '/field-mapper';
             } catch (error) {
                 alert('保存失败: ' + error.message);
             } finally {
@@ -543,7 +697,10 @@
         });
 
         // ====== 初始化 ======
-        document.addEventListener('DOMContentLoaded', loadProviders);
+        document.addEventListener('DOMContentLoaded', () => {
+            loadProviders();
+            loadDifyConfig();
+        });
     </script>
 
     <style>

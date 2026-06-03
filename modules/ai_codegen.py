@@ -5,22 +5,23 @@ from typing import Dict, List, Any, Optional, Tuple
 import time
 
 class AICodeGenerator:
-    """AI代码生成模块 - 负责调用AI API生成DuckDB SQL（支持DeepSeek/百炼/Kimi等OpenAI兼容API）"""
+    """AI代码生成模块 - 通过 Dify 代理调用 AI 生成 DuckDB SQL"""
 
-    def __init__(self, api_key: str, provider: str = "deepseek", api_url: str = None, model: str = None):
+    def __init__(self, dify_client=None, api_key: str = None,
+                 provider: str = "deepseek", api_url: str = None,
+                 model: str = None):
         """
         初始化AI代码生成器
 
         Args:
-            api_key: API密钥
-            provider: 供应商ID（deepseek/bailian/kimi）
-            api_url: API端点URL（覆盖供应商默认值）
-            model: 模型名称（覆盖供应商默认值）
+            dify_client: DifyClient 实例（优先使用）
+            api_key, provider, api_url, model: 旧版参数（dify_client 为 None 时使用）
         """
+        self.dify_client = dify_client
         self.api_key = api_key
         self.provider = provider
 
-        # 加载供应商配置
+        # 加载供应商配置（兜底用）
         from config import Config
         provider_config = Config.AI_PROVIDERS.get(provider, Config.AI_PROVIDERS["deepseek"])
 
@@ -127,7 +128,7 @@ class AICodeGenerator:
 
     def _call_api(self, prompt: str) -> str:
         """
-        调用DeepSeek API
+        调用 AI API（优先用 Dify 代理，兜底用直接 API）
 
         Args:
             prompt: 提示词
@@ -135,6 +136,18 @@ class AICodeGenerator:
         Returns:
             API响应内容
         """
+        # 优先使用 Dify 代理
+        if self.dify_client:
+            return self.dify_client.chat(
+                "你是一个专业的SQL数据分析专家，专门生成DuckDB SQL查询。",
+                prompt,
+                timeout=30,
+            )
+
+        # 兜底：直接调用 OpenAI 兼容 API
+        if not self.api_key:
+            raise Exception("未配置 API Key")
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
@@ -300,6 +313,21 @@ class AICodeGenerator:
 - 每行格式：{{代码行}} — {{一句话说明}}
 - 简洁，不要多余内容"""
 
+        # 优先使用 Dify 代理
+        if self.dify_client:
+            try:
+                return self.dify_client.chat(
+                    "你是一个专业的 SQL 解释器。",
+                    prompt,
+                    timeout=30,
+                ).strip()
+            except Exception:
+                return "解释生成失败。"
+
+        # 兜底：直接调用 OpenAI 兼容 API
+        if not self.api_key:
+            return "请先配置 API Key"
+
         try:
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
@@ -376,6 +404,22 @@ class AICodeGenerator:
    - 用"等"或"等相关关键词"收尾列举。
 
 优化后的查询:"""
+
+        # 优先使用 Dify 代理
+        if self.dify_client:
+            try:
+                optimized_query = self.dify_client.chat(
+                    '你是财务数据查询优化专家。把模糊概念变具体（月底→最后五天），扩展关键词的英文/缩写变体（调整→adj、adjustment），识别人名加拼音变体。不扩展字段名。',
+                    prompt,
+                    timeout=30,
+                ).strip()
+                optimized_query = optimized_query.replace('优化后的查询:', '').replace('优化查询:', '').strip()
+                return optimized_query
+            except Exception:
+                return query
+
+        if not self.api_key:
+            return query
 
         try:
             headers = {

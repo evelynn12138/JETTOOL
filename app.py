@@ -18,6 +18,7 @@ from modules.audit_trail import log_generate, log_execute
 from modules.preset_rules import get_rules, get_packs, get_custom_rules, get_rule_by_id, apply_rule, save_rule, delete_rule
 from modules.sampling import get_methods, generate_sql
 from modules.crypto_utils import encrypt as crypto_encrypt, decrypt as crypto_decrypt
+from modules.dify_client import DifyClient
 
 # 用于将 session 中的映射（{标准字段名: 源字段名}）转换为前端渲染格式（{stdFieldId: 源字段名}）
 JOURNAL_NAME_TO_ID = {f['name']: f['id'] for f in [
@@ -1222,13 +1223,6 @@ def ai_analyze_integrity():
         return jsonify({'success': False, 'error': '所有测试均已通过'})
 
     try:
-        provider = session.get('ai_provider', 'deepseek')
-        model = session.get('ai_model')
-        plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
-        provider_config = Config.AI_PROVIDERS.get(provider, Config.AI_PROVIDERS["deepseek"])
-        api_url = provider_config["api_url"]
-        model_name = model or provider_config["model"]
-
         # ---- 构建 prompt ----
         lines = [
             "你是一名资深的财务审计专家。以下是财务数据完整性测试的结果，请从审计专业角度逐项分析异常原因，并给出后续建议。",
@@ -1310,27 +1304,14 @@ def ai_analyze_integrity():
         ])
         prompt = "\n".join(lines)
 
-        # ---- 调用 AI ----
-        import requests as http_req
-        headers = {
-            "Authorization": f"Bearer {plain_key}",
-            "Content-Type": "application/json",
-        }
-        req_data = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": "你是一名资深的财务审计专家，擅长从审计视角分析财务数据问题。"},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.3,
-            "max_tokens": 2000,
-        }
-        resp = http_req.post(api_url, headers=headers, json=req_data, timeout=60)
-        if resp.status_code != 200:
-            return jsonify({'success': False, 'error': f'AI 请求失败: {resp.status_code}'})
-
-        content = resp.json()['choices'][0]['message']['content'].strip()
-        return jsonify({'success': True, 'analysis': content})
+        # ---- 通过 Dify 代理调用 AI ----
+        dify = _get_dify_client()
+        content = dify.chat(
+            "你是一名资深的财务审计专家，擅长从审计视角分析财务数据问题。",
+            prompt,
+            timeout=60,
+        )
+        return jsonify({'success': True, 'analysis': content.strip()})
 
     except Exception as e:
         import traceback
@@ -1576,10 +1557,6 @@ def configure_fields():
 def auto_map_fields():
     """AI 自动字段映射 — 调用 AI 根据列名、类型、样本值推荐映射"""
     data = request.json
-    api_key = session.get('api_key')
-
-    if not api_key:
-        return jsonify({'success': False, 'error': '请先配置 API Key'})
 
     journal_fields = data.get('journal_fields', [])
     journal_standard = data.get('journal_standard_fields', [])
@@ -1590,13 +1567,6 @@ def auto_map_fields():
         return jsonify({'success': False, 'error': '字段信息不完整'})
 
     try:
-        provider = session.get('ai_provider', 'deepseek')
-        model = session.get('ai_model')
-        plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
-        provider_config = Config.AI_PROVIDERS.get(provider, Config.AI_PROVIDERS["deepseek"])
-        api_url = provider_config["api_url"]
-        model_name = model or provider_config["model"]
-
         # Build prompt
         lines = [
             "你是一个数据工程师，负责将用户上传的Excel列映射到标准字段。",
@@ -1637,26 +1607,13 @@ def auto_map_fields():
         ])
         prompt = "\n".join(lines)
 
-        # Call AI
-        import requests as http_req
-        headers = {
-            "Authorization": f"Bearer {plain_key}",
-            "Content-Type": "application/json"
-        }
-        req_data = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": "你只返回 JSON，不加 Markdown 代码块。"},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.1,
-            "max_tokens": 2000,
-        }
-        resp = http_req.post(api_url, headers=headers, json=req_data, timeout=30)
-        if resp.status_code != 200:
-            return jsonify({'success': False, 'error': f'AI 请求失败: {resp.status_code}'})
-
-        content = resp.json()['choices'][0]['message']['content'].strip()
+        # 通过 Dify 代理调用 AI
+        dify = _get_dify_client()
+        content = dify.chat(
+            "你只返回 JSON，不加 Markdown 代码块。",
+            prompt,
+            timeout=30,
+        )
 
         # Strip markdown code block wrappers if present
         if content.startswith('```'):
@@ -1827,24 +1784,13 @@ def api_report_detect():
     if not filepath or not os.path.exists(filepath):
         return jsonify({'success': False, 'error': '请先上传文件'})
 
-    api_key = session.get('api_key')
-    if not api_key:
-        return jsonify({'success': False, 'error': '请先在「API 配置」中设置 API Key'})
-
     try:
-        plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
-    except Exception:
-        return jsonify({'success': False, 'error': 'API Key 解密失败，请重新配置'})
-
-    provider = session.get('ai_provider', 'deepseek')
-    model = session.get('ai_model')
-
-    try:
+        dify = _get_dify_client()
         from modules.report_cleaner import ReportCleaner
         cleaner = ReportCleaner()
         cleaner.load_file(filepath)
 
-        meta = cleaner.ai_detect(sheet_name, plain_key, provider=provider, model=model)
+        meta = cleaner.ai_detect(sheet_name, dify)
         return jsonify(meta)
     except Exception as e:
         app.logger.error(f"[REPORT-DETECT] {e}")
@@ -1916,16 +1862,12 @@ def api_report_reconciliation():
     if not filepath or not os.path.exists(filepath):
         return jsonify({'success': False, 'error': '请先上传文件'})
 
-    api_key = session.get('api_key')
-    plain_key = None
-    if api_key:
-        try:
-            plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
-        except Exception:
-            return jsonify({'success': False, 'error': 'API Key 解密失败，请重新配置'})
-
-    provider = session.get('ai_provider', 'deepseek')
-    model = session.get('ai_model')
+    # 构建 Dify 客户端（给 AI 兜底用，可选）
+    dify_client = None
+    try:
+        dify_client = _get_dify_client()
+    except Exception:
+        pass  # 没有 Dify 配置时不阻断，只跳过 AI 兜底
 
     try:
         from modules.report_reconciliation import ReconciliationEngine
@@ -1997,9 +1939,7 @@ def api_report_reconciliation():
             # 初始调用 → 返回映射数据
             result = reconciler.get_balance_mappings(
                 report_data,
-                api_key=plain_key,
-                provider=provider,
-                model=model,
+                dify_client=dify_client,
             )
         # 把引擎实际使用的字段名也加到调试信息中
         if isinstance(result, dict) and '_fields' in result:
@@ -2146,24 +2086,6 @@ def api_report_reconciliation_ai_analyze():
     comparison = data.get('comparison', [])
     mappings = data.get('mappings', [])
 
-    api_key = session.get('api_key')
-    if not api_key:
-        return jsonify({'success': False, 'error': '请先配置 API Key'})
-
-    try:
-        plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
-    except Exception as e:
-        app.logger.error(f"[RECONCILE-AI] 解密失败: {e}")
-        return jsonify({'success': False, 'error': f'API Key 解密失败，请重新配置: {e}'})
-
-    provider = session.get('ai_provider', 'deepseek')
-    model = session.get('ai_model')
-    import requests
-
-    cfg = Config.AI_PROVIDERS.get(provider, Config.AI_PROVIDERS["deepseek"])
-    url = cfg.get("api_url", Config.DEEPSEEK_API_URL)
-    model_name = model or cfg.get("model", Config.DEEPSEEK_MODEL)
-
     # 构造差异数据
     diff_lines = []
     for c in comparison:
@@ -2212,30 +2134,17 @@ def api_report_reconciliation_ai_analyze():
 """
 
     try:
-        resp = requests.post(url, headers={
-            "Authorization": f"Bearer {plain_key}",
-            "Content-Type": "application/json",
-        }, json={
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": "你是一个经验丰富的审计数据核对专家。"},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.2,
-            "max_tokens": 2000,
-        }, timeout=30)
-
-        if resp.status_code != 200:
-            err_detail = resp.text[:500]
-            app.logger.error(f"[RECONCILE-AI] API 错误 {resp.status_code}: {err_detail}")
-            return jsonify({'success': False, 'error': f'API 返回错误 ({resp.status_code}): {err_detail}'})
-
-        analysis = resp.json()['choices'][0]['message']['content']
+        # 通过 Dify 代理调用 AI
+        dify = _get_dify_client()
+        analysis = dify.chat(
+            "你是一个经验丰富的审计数据核对专家。",
+            prompt,
+            timeout=30,
+        )
         return jsonify({'success': True, 'analysis': analysis})
 
-    except requests.exceptions.Timeout:
-        return jsonify({'success': False, 'error': 'API 请求超时'})
     except Exception as e:
+        app.logger.error(f"[RECONCILE-AI] 分析失败: {e}")
         return jsonify({'success': False, 'error': f'分析失败: {e}'})
 
 
@@ -2456,6 +2365,72 @@ def configure_api():
         'pre_configured': session.get('api_key_source') == 'builtin',
     })
 
+
+# ══════════════════════════════════════════════════════════
+#  Dify 代理配置
+# ══════════════════════════════════════════════════════════
+
+def _get_dify_client():
+    """从 session 获取 Dify 配置并创建客户端"""
+    dify_api_key = session.get('dify_api_key')
+    if not dify_api_key:
+        raise Exception('请先在 API 配置中设置 Dify 代理')
+
+    try:
+        plain_key = crypto_decrypt(dify_api_key, Config.SECRET_KEY)
+    except Exception as e:
+        raise Exception(f'Dify API Key 解密失败，请重新配置: {e}')
+
+    dify_base_url = session.get('dify_base_url') or Config.DIFY_BASE_URL
+    return DifyClient(dify_base_url, plain_key)
+
+
+@app.route('/api/configure-dify', methods=['POST'])
+def configure_dify():
+    """API: 配置 Dify 代理（API URL + API Key，加密存储）"""
+    data = request.json
+    base_url = data.get('base_url', '').strip()
+    api_key = data.get('api_key', '').strip()
+
+    if not base_url:
+        return jsonify({'success': False, 'error': 'Dify API 地址不能为空'})
+    if not api_key:
+        return jsonify({'success': False, 'error': 'Dify API Key 不能为空'})
+
+    # 加密存储 Dify API Key
+    encrypted_key = crypto_encrypt(api_key, Config.SECRET_KEY)
+
+    session['dify_api_key'] = encrypted_key
+    session['dify_base_url'] = base_url
+    session.modified = True
+
+    # 测试连接
+    try:
+        client = DifyClient(base_url, api_key)
+        client.chat("你是一个测试助手", "回复OK即可", timeout=10)
+        return jsonify({'success': True, 'message': 'Dify 代理配置已保存，连接测试通过'})
+    except Exception as e:
+        # 配置保存成功但测试失败，不阻塞
+        app.logger.warning(f"[DIFY] 配置测试连接失败: {e}")
+        return jsonify({
+            'success': True,
+            'warning': str(e),
+            'message': 'Dify 代理配置已保存，但连接测试未通过，请检查地址和 Key 是否正确'
+        })
+
+
+@app.route('/api/dify-status', methods=['GET'])
+def dify_status():
+    """API: 返回 Dify 代理配置状态"""
+    configured = bool(session.get('dify_api_key'))
+    base_url = session.get('dify_base_url') or Config.DIFY_BASE_URL
+    return jsonify({
+        'success': True,
+        'configured': configured,
+        'base_url': base_url if configured else None,
+    })
+
+
 @app.route('/api/review-code', methods=['POST'])
 def review_code():
     """API: 复核 AI 生成的 SQL 代码 — 由第二 AI 模型（或同级模型）从语法、安全、意图、性能四个维度审查"""
@@ -2466,20 +2441,7 @@ def review_code():
     if not code:
         return jsonify({'success': False, 'error': '代码不能为空'})
 
-    api_key = session.get('review_api_key') or session.get('api_key')
-    if not api_key:
-        return jsonify({'success': False, 'error': '请先配置 API Key（主模型或复核模型）'})
-
     try:
-        provider = session.get('review_provider') or session.get('ai_provider', 'deepseek')
-        model = session.get('review_model') or session.get('ai_model')
-        review_api_url = session.get('review_api_url')
-
-        plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
-        provider_config = Config.AI_PROVIDERS.get(provider, Config.AI_PROVIDERS["deepseek"])
-        api_url = review_api_url or provider_config["api_url"]
-        model_name = model or provider_config["model"]
-
         # 获取字段信息用于上下文
         data_info = session.get('data_info', {})
         fields = data_info.get('mapped_fields', data_info.get('fields', []))
@@ -2517,27 +2479,16 @@ def review_code():
   ]
 }}"""
 
-        import requests as http_req
-        headers = {
-            "Authorization": f"Bearer {plain_key}",
-            "Content-Type": "application/json",
-        }
-        req_data = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": "你是一名资深的 SQL 审查专家。只输出 JSON，不要加 Markdown 代码块包裹。"},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.1,
-            "max_tokens": 1500,
-        }
-        resp = http_req.post(api_url, headers=headers, json=req_data, timeout=60)
-        if resp.status_code != 200:
-            return jsonify({'success': False, 'error': f'复核请求失败: {resp.status_code}'})
-
-        content = resp.json()['choices'][0]['message']['content'].strip()
+        # 通过 Dify 代理调用 AI
+        dify = _get_dify_client()
+        content = dify.chat(
+            "你是一名资深的 SQL 审查专家。只输出 JSON，不要加 Markdown 代码块包裹。",
+            prompt,
+            timeout=60,
+        )
 
         # 清理 Markdown 包裹
+        content = content.strip()
         if content.startswith('```'):
             content = re.sub(r'^```(?:json)?\s*', '', content)
             content = re.sub(r'\s*```$', '', content)
@@ -2554,7 +2505,7 @@ def review_code():
         return jsonify({
             'success': True,
             'review': review_result,
-            'model_used': model_name,
+            'model_used': 'Dify (Qwen3-30B-A3B)',
         })
 
     except Exception as e:
@@ -2575,20 +2526,14 @@ def generate_code():
     if not query:
         return jsonify({'success': False, 'error': '查询语句不能为空'})
 
-    api_key = session.get('api_key')
-    if not api_key:
-        return jsonify({'success': False, 'error': '请先配置API Key'})
-
     data_info = session.get('data_info')
     if not data_info:
         return jsonify({'success': False, 'error': '请先上传数据文件'})
 
     try:
-        provider = session.get('ai_provider', 'deepseek')
-        model = session.get('ai_model')
-        # 解密存储的 API Key
-        plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
-        generator = AICodeGenerator(plain_key, provider=provider, model=model)
+        # 使用 Dify 代理
+        dify = _get_dify_client()
+        generator = AICodeGenerator(dify_client=dify)
         fields = data_info.get('mapped_fields', data_info.get('fields', []))
         preview = data_info.get('mapped_preview', data_info.get('preview', []))
 
@@ -2851,24 +2796,10 @@ def optimize_query():
     local_expanded = expand_keywords(query)
     expanded_terms = [m['standard'] for m in find_keywords(query)]
 
-    # 2. AI 二次扩展
-    api_key = session.get('api_key')
-    if not api_key:
-        # 无 API Key 时返回本地扩展结果
-        return jsonify({
-            'success': True,
-            'original_query': query,
-            'local_expanded': local_expanded,
-            'optimized_query': local_expanded,
-            'expanded_terms': expanded_terms,
-            'source': 'local'
-        })
-
+    # 2. AI 二次扩展（通过 Dify 代理）
     try:
-        provider = session.get('ai_provider', 'deepseek')
-        model = session.get('ai_model')
-        plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
-        generator = AICodeGenerator(plain_key, provider=provider, model=model)
+        dify = _get_dify_client()
+        generator = AICodeGenerator(dify_client=dify)
         ai_optimized = generator.optimize_query(query, local_expanded=local_expanded)
         return jsonify({
             'success': True,
@@ -2900,15 +2831,9 @@ def explain_code():
     if not code:
         return jsonify({'success': False, 'error': '代码不能为空'})
 
-    api_key = session.get('api_key')
-    if not api_key:
-        return jsonify({'success': False, 'error': '请先配置API Key'})
-
     try:
-        provider = session.get('ai_provider', 'deepseek')
-        model = session.get('ai_model')
-        plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
-        generator = AICodeGenerator(plain_key, provider=provider, model=model)
+        dify = _get_dify_client()
+        generator = AICodeGenerator(dify_client=dify)
         explanation = generator.explain_code(code)
         session['last_explanation'] = explanation
         return jsonify({'success': True, 'explanation': explanation})

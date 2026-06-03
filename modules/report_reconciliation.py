@@ -162,10 +162,7 @@ class ReconciliationEngine:
     # ══════════════════════════════════════════════════════════
 
     def get_balance_mappings(self, report_data: dict,
-                             api_key: str = None,
-                             provider: str = "deepseek",
-                             model: str = None,
-                             api_url: str = None) -> dict:
+                             dify_client=None) -> dict:
         """
         返回科目余额表每行 + 规则初始映射 + 报表项目列表
         company 字段用于前端筛选
@@ -219,8 +216,8 @@ class ReconciliationEngine:
                 unmatched.append(mapped_row)
 
         # AI 兜底（只补未匹配的）
-        if unmatched and api_key:
-            ai_result = self._ai_fallback(unmatched, report_items, api_key, provider, model, api_url)
+        if unmatched and dify_client:
+            ai_result = self._ai_fallback(unmatched, report_items, dify_client)
             for code_key, report_item in ai_result.items():
                 for rw in rows_with_mapping:
                     if rw["account_code"] == code_key:
@@ -433,16 +430,8 @@ class ReconciliationEngine:
     # ══════════════════════════════════════════════════════════
 
     def _ai_fallback(self, unmatched: list, report_items: list,
-                     api_key: str, provider: str, model: str,
-                     api_url: str) -> dict:
-        """AI 补全：返回 {account_code: report_item}"""
-        from config import Config
-        import requests
-
-        cfg = Config.AI_PROVIDERS.get(provider, Config.AI_PROVIDERS["deepseek"])
-        url = api_url or cfg.get("api_url", Config.DEEPSEEK_API_URL)
-        model_name = model or cfg.get("model", Config.DEEPSEEK_MODEL)
-
+                     dify_client) -> dict:
+        """通过 Dify 代理 AI 补全：返回 {account_code: report_item}"""
         acct_lines = "\n".join(
             f"  - 科目编号: {u['account_code'] or '(无)'}, 科目名称: {u['account_name']}"
             for u in unmatched[:50]
@@ -462,22 +451,11 @@ class ReconciliationEngine:
 只返回 JSON 数组，不要其他内容。
 """
         try:
-            resp = requests.post(url, headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            }, json={
-                "model": model_name,
-                "messages": [
-                    {"role": "system", "content": "你是一个会计科目映射专家，返回严格 JSON 格式。"},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.1,
-                "max_tokens": 2000,
-            }, timeout=30)
-            if resp.status_code != 200:
-                return {}
-
-            content = resp.json()['choices'][0]['message']['content']
+            content = dify_client.chat(
+                "你是一个会计科目映射专家，返回严格 JSON 格式。",
+                prompt,
+                timeout=30,
+            )
             parsed = self._parse_json(content)
             if not isinstance(parsed, list):
                 return {}

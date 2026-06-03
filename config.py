@@ -20,6 +20,9 @@ class Config:
     DEEPSEEK_MODEL = "deepseek-chat"
     DEEPSEEK_TEMPERATURE = 0.3
 
+    # Dify 代理配置（作为 LLM 代理层，覆盖所有非 Function Calling 的 AI 调用）
+    DIFY_BASE_URL = "https://ai-platform-uat.ey.net/v1"
+
     # AI供应商配置
     AI_PROVIDERS = {
         "deepseek": {

@@ -176,19 +176,11 @@ class ReportCleaner:
 
     # ── AI 结构检测 ───────────────────────────────────────
 
-    def ai_detect(self, sheet_name: str, api_key: str,
-                  provider: str = "deepseek",
-                  api_url: str = None,
-                  model: str = None) -> dict:
+    def ai_detect(self, sheet_name: str, dify_client) -> dict:
         """
-        调用 AI 检测报表结构。
+        调用 Dify 代理检测报表结构。
         返回结构化 meta dict。
         """
-        from config import Config
-        cfg = Config.AI_PROVIDERS.get(provider, Config.AI_PROVIDERS["deepseek"])
-        url = api_url or cfg.get("api_url", Config.DEEPSEEK_API_URL)
-        model_name = model or cfg.get("model", Config.DEEPSEEK_MODEL)
-
         preview_rows = self.preview_raw(sheet_name, nrows=10)
         rows_text = "\n".join(
             f"第{r+1}行: " + " | ".join(
@@ -240,38 +232,14 @@ class ReportCleaner:
 8. **confidence**: 0-1，对自己判断的确认程度
 """
 
-        # 调用 AI API
-        payload = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": "你是一个专业的财务报表格式分析专家，返回严格 JSON 格式的分析结果。"},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.1,
-            "max_tokens": 2000,
-        }
-
         try:
-            resp = requests.post(
-                url,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
+            content = dify_client.chat(
+                "你是一个专业的财务报表格式分析专家，返回严格 JSON 格式的分析结果。",
+                prompt,
                 timeout=30,
             )
-            if resp.status_code != 200:
-                err = resp.json().get('error', {}).get('message', str(resp.status_code))
-                return {"success": False, "error": f"API 返回错误: {err}"}
-
-            content = resp.json()['choices'][0]['message']['content']
-        except requests.exceptions.Timeout:
-            return {"success": False, "error": "API 请求超时，请重试"}
-        except requests.exceptions.ConnectionError:
-            return {"success": False, "error": "网络连接失败，请检查网络"}
         except Exception as e:
-            return {"success": False, "error": f"API 调用异常: {e}"}
+            return {"success": False, "error": f"AI 检测失败: {e}"}
 
         # 解析 JSON
         meta = self._parse_json_response(content)
