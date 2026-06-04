@@ -919,6 +919,235 @@
         reconcileAiAnalysis.style.display = 'none';
     });
 
+    // ── 一键优化映射 ──
+    const reconcileOptimizeBtn = $('reconcile-optimize-btn');
+    const optimizePanel = $('reconcile-optimize-panel');
+    const optimizeLoading = $('reconcile-optimize-loading');
+    const optimizeBody = $('reconcile-optimize-body');
+    const optimizeClose = $('reconcile-optimize-close');
+    const optimizeTitle = $('reconcile-optimize-title');
+
+    if (reconcileOptimizeBtn) {
+        reconcileOptimizeBtn.addEventListener('click', async () => {
+            if (!reconcileState.comparison || reconcileState.comparison.length === 0) {
+                showError(reconcileError, '请先刷新核对');
+                return;
+            }
+
+            // 检查是否有差异可优化
+            const hasDiff = reconcileState.comparison.some(c => Math.abs(c.diff || 0) > 0.01);
+            if (!hasDiff) {
+                showError(reconcileError, '当前核对已完全一致，无需优化');
+                return;
+            }
+
+            hideError(reconcileError);
+            optimizePanel.style.display = 'block';
+            optimizeLoading.style.display = 'block';
+            optimizeBody.innerHTML = '';
+            optimizeTitle.textContent = '正在优化映射...';
+
+            const mappings = reconcileState.balanceRows.map(r => ({
+                account_code: r.account_code,
+                account_name: r.account_name,
+                ending_balance: r.ending_balance,
+                report_item: r.report_item || '',
+            }));
+
+            const reportDataList = state.reports.map(r => ({
+                data: r.data || [],
+                columns: r.columns || [],
+                report_type: r.reportType || 'unknown',
+            }));
+
+            try {
+                const resp = await fetch('/api/report-reconciliation/optimize', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        mappings: mappings,
+                        report_data_list: reportDataList,
+                        sheet_name: state.reports[0]?.sheetName || '',
+                        detection_meta: state.detectionMeta || {},
+                    }),
+                });
+                const data = await resp.json();
+                optimizeLoading.style.display = 'none';
+
+                if (!data.success) {
+                    optimizeBody.innerHTML = `<div style="color:#dc2626;padding:12px;">优化失败: ${escapeHtml(data.error || '未知错误')}</div>`;
+                    return;
+                }
+
+                // 渲染优化结果
+                renderOptimizeResult(data);
+            } catch (e) {
+                optimizeLoading.style.display = 'none';
+                optimizeBody.innerHTML = `<div style="color:#dc2626;padding:12px;">网络错误: ${escapeHtml(e.message)}</div>`;
+            }
+        });
+    }
+
+    function renderOptimizeResult(data) {
+        const changes = data.changes || [];
+        const metrics = data.metrics || {};
+        const optimizedMappings = data.optimized_mappings || [];
+        const comparison = data.comparison || [];
+        const stats = data.stats || {};
+
+        const initialDiff = metrics.initial_diff || 0;
+        const finalDiff = metrics.final_diff || 0;
+        const improvement = metrics.improvement || 0;
+        const improvementPct = metrics.improvement_pct || 0;
+        const iterations = metrics.iterations || 0;
+
+        if (changes.length === 0) {
+            // 无优化建议
+            optimizeTitle.textContent = '映射优化 — 无需调整';
+            optimizeBody.innerHTML = `
+                <div style="text-align:center;padding:20px;color:var(--secondary-color);">
+                    <i class="fas fa-check-circle" style="font-size:32px;color:#166534;margin-bottom:8px;display:block;"></i>
+                    <div style="font-size:15px;font-weight:600;color:#166534;">当前映射已是最优</div>
+                    <div style="margin-top:8px;font-size:13px;color:#6b7280;">
+                        总差异: ${initialDiff.toFixed(2)} | 匹配率: ${stats.match_rate || 0}%
+                    </div>
+                </div>`;
+            return;
+        }
+
+        // 有优化建议
+        const isBetter = finalDiff < initialDiff - 0.01;
+        optimizeTitle.textContent = isBetter
+            ? `🎯 优化完成 — 差异减少 ${improvement.toFixed(2)} (${improvementPct}%)`
+            : '映射优化结果';
+
+        let html = '';
+
+        // 统计摘要
+        html += `
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+            <div style="background:#f3e8ff;border-radius:8px;padding:10px 16px;flex:1;min-width:120px;text-align:center;">
+                <div style="font-size:11px;color:#6b21a8;margin-bottom:2px;">优化前总差异</div>
+                <div style="font-size:20px;font-weight:700;color:#581c87;">${initialDiff.toFixed(2)}</div>
+            </div>
+            <div style="background:#fce7f3;border-radius:8px;padding:10px 16px;flex:1;min-width:120px;text-align:center;">
+                <div style="font-size:11px;color:#9d174d;margin-bottom:2px;">优化后总差异</div>
+                <div style="font-size:20px;font-weight:700;color:#831843;">${finalDiff.toFixed(2)}</div>
+            </div>
+            <div style="background:${isBetter ? '#f0fdf4' : '#fef3c7'};border-radius:8px;padding:10px 16px;flex:1;min-width:120px;text-align:center;">
+                <div style="font-size:11px;color:${isBetter ? '#166534' : '#92400e'};margin-bottom:2px;">${isBetter ? '减少' : '变化'}</div>
+                <div style="font-size:20px;font-weight:700;color:${isBetter ? '#15803d' : '#b45309'};">${isBetter ? '-' : '+'}${improvement.toFixed(2)}</div>
+            </div>
+            <div style="background:#f8f9fa;border-radius:8px;padding:10px 16px;flex:1;min-width:120px;text-align:center;">
+                <div style="font-size:11px;color:#6b7280;margin-bottom:2px;">调整次数</div>
+                <div style="font-size:20px;font-weight:700;color:#374151;">${iterations}</div>
+            </div>
+            <div style="background:#f8f9fa;border-radius:8px;padding:10px 16px;flex:1;min-width:120px;text-align:center;">
+                <div style="font-size:11px;color:#6b7280;margin-bottom:2px;">匹配率</div>
+                <div style="font-size:20px;font-weight:700;color:#374151;">${stats.match_rate || 0}%</div>
+            </div>
+        </div>`;
+
+        // 变更明细
+        html += `
+        <div style="margin-bottom:12px;">
+            <div style="font-weight:600;margin-bottom:8px;color:#374151;font-size:14px;">
+                <i class="fas fa-list"></i> 映射调整明细（${changes.length} 项）
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead>
+                    <tr style="background:#f3f4f6;">
+                        <th style="padding:6px 8px;text-align:left;">科目</th>
+                        <th style="padding:6px 8px;text-align:left;">从</th>
+                        <th style="padding:6px 8px;text-align:center;">→</th>
+                        <th style="padding:6px 8px;text-align:left;">到</th>
+                        <th style="padding:6px 8px;text-align:right;">方式</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+        const changeSet = [];
+        const seenKeys = new Set();
+        for (const ch of changes) {
+            const key = ch.account_code + '|' + ch.to;
+            if (seenKeys.has(key)) continue; // 交换场景两条记录只显示一条
+            seenKeys.add(key);
+            changeSet.push(ch);
+        }
+
+        for (const ch of changeSet) {
+            const diffBefore = ch.diff_before || 0;
+            const diffAfter = ch.diff_after || 0;
+            html += `
+                <tr style="border-bottom:1px solid #f3f4f6;">
+                    <td style="padding:5px 8px;font-weight:600;">${escapeHtml(ch.account_code || '')}<br><span style="font-weight:normal;font-size:11px;color:#6b7280;">${escapeHtml(ch.account_name || '')}</span></td>
+                    <td style="padding:5px 8px;color:#dc2626;font-size:12px;">${escapeHtml(ch.from || '(无)')}</td>
+                    <td style="padding:5px 8px;text-align:center;color:#6b7280;">→</td>
+                    <td style="padding:5px 8px;color:#166534;font-weight:600;">${escapeHtml(ch.to || '')}</td>
+                    <td style="padding:5px 8px;text-align:right;font-size:11px;color:#6b7280;">${escapeHtml(ch.reason || '单科目移动')}</td>
+                </tr>`;
+        }
+
+        html += `</tbody></table></div>`;
+
+        // 操作按钮
+        html += `
+        <div style="display:flex;gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid #e5e7eb;">
+            <button class="btn btn-primary" id="apply-optimize-btn" style="padding:8px 20px;font-size:14px;">
+                <i class="fas fa-check"></i> 应用优化方案
+            </button>
+            <button class="btn btn-secondary" id="discard-optimize-btn" style="padding:8px 20px;font-size:14px;">
+                放弃
+            </button>
+        </div>`;
+
+        optimizeBody.innerHTML = html;
+
+        // 应用优化
+        document.getElementById('apply-optimize-btn').addEventListener('click', () => {
+            // 更新 balanceRows 的 report_item
+            const optMap = new Map();
+            optimizedMappings.forEach(m => {
+                const key = (m.account_code || '') + '|' + (m.account_name || '');
+                optMap.set(key, m.report_item || '');
+            });
+
+            reconcileState.balanceRows.forEach(r => {
+                const key = (r.account_code || '') + '|' + (r.account_name || '');
+                if (optMap.has(key)) {
+                    r.report_item = optMap.get(key);
+                }
+            });
+
+            optimizePanel.style.display = 'none';
+
+            // 更新 comparison 和 stats
+            reconcileState.comparison = comparison;
+            reconcileState.stats = stats;
+
+            // 重新渲染
+            renderBalanceTable();
+            renderResultTable();
+
+            // 如果改善明显，提醒用户
+            if (improvementPct >= 20) {
+                showError(reconcileError, `✅ 优化完成！差异减少 ${improvementPct}%，共调整 ${iterations} 项科目映射。`);
+            }
+        });
+
+        // 放弃
+        document.getElementById('discard-optimize-btn').addEventListener('click', () => {
+            optimizePanel.style.display = 'none';
+        });
+    }
+
+    // 关闭优化面板
+    if (optimizeClose) {
+        optimizeClose.addEventListener('click', () => {
+            optimizePanel.style.display = 'none';
+        });
+    }
+
     // 导出核对结果
     reconcileExportBtn.addEventListener('click', async () => {
         const mappings = reconcileState.balanceRows.map(r => ({

@@ -127,12 +127,19 @@
                 <div class="settings-section" style="border-top: 1px solid #e5e7eb; padding-top: 16px; margin-top: 16px;">
                     <div class="reverse-cf-toggle">
                         <label class="toggle-switch">
-                            <input type="checkbox" id="direction-adjust-checkbox">
+                            <input type="checkbox" id="direction-adjust-checkbox" {% if has_direction_field %}checked{% endif %}>
                             <span class="toggle-slider"></span>
                         </label>
                         <div class="toggle-label">
                             <strong>借正贷负方向调整</strong>
-                            <p id="direction-adjust-hint">开启后，序时账金额将按借贷方向调整正负号（借方为正、贷方为负），适用于数据有"方向"字段且已映射的场景</p>
+                            <p id="direction-adjust-hint">
+                                开启后，序时账金额将按借贷方向调整正负号（借方为正、贷方为负）
+                                {% if has_direction_field %}
+                                <span style="color:#166534;font-weight:600;">✅ 已映射方向字段</span>
+                                {% else %}
+                                <span style="color:#dc2626;font-weight:600;">⚠️ 未映射方向字段，需先在字段映射中配置</span>
+                                {% endif %}
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -326,6 +333,9 @@
                             <button class="btn btn-primary" id="reconcile-refresh-btn" style="padding:6px 14px;font-size:13px;">
                                 <i class="fas fa-sync"></i> 刷新核对
                             </button>
+                            <button class="btn" id="reconcile-optimize-btn" style="padding:6px 14px;font-size:13px;background:#db2777;color:white;border:none;border-radius:5px;cursor:pointer;">
+                                <i class="fas fa-magic"></i> 一键优化
+                            </button>
                             <span style="width:1px;height:24px;background:#d1d5db;margin:0 4px;"></span>
                             <button class="btn" id="reconcile-ai-btn" style="padding:6px 14px;font-size:13px;background:var(--yellow);color:var(--black);border:none;border-radius:5px;cursor:pointer;">
                                 <i class="fas fa-robot"></i> AI 差异分析
@@ -406,6 +416,21 @@
                                 <div id="reconcile-ai-loading" style="display:none;text-align:center;padding:20px;color:var(--secondary-color);">
                                     <div class="loading-spinner" style="display:inline-block;"></div> AI 正在分析差异...
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- 优化结果面板 -->
+                        <div id="reconcile-optimize-panel" style="display:none;margin-top:16px;">
+                            <div class="ai-analysis-card" style="border-left:4px solid #db2777;">
+                                <div class="ai-analysis-header">
+                                    <i class="fas fa-magic"></i>
+                                    <h4 id="reconcile-optimize-title">映射优化结果</h4>
+                                    <button class="btn btn-small" id="reconcile-optimize-close" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:18px;color:var(--secondary-color);">&times;</button>
+                                </div>
+                                <div id="reconcile-optimize-loading" style="display:none;text-align:center;padding:20px;color:var(--secondary-color);">
+                                    <div class="loading-spinner" style="display:inline-block;"></div> 正在优化映射...
+                                </div>
+                                <div id="reconcile-optimize-body" style="padding:12px 16px;"></div>
                             </div>
                         </div>
                     </div>
@@ -977,7 +1002,9 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         reverse_carry_forward: cfCheckbox.checked,
-                        leaf_accounts: leafCheckbox.checked
+                        leaf_accounts: leafCheckbox.checked,
+                        cf_account_code: document.getElementById('cf-account-code').value.trim() || '4103',
+                        cf_keywords: document.getElementById('cf-keywords').value.split(',').map(s => s.trim()).filter(Boolean) || ['结转', '损益']
                     })
                 });
 

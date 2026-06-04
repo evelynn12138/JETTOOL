@@ -6,6 +6,7 @@ import uuid
 import json as json_module
 import re
 import numpy as np
+import requests
 from config import Config
 
 # 导入模块
@@ -335,7 +336,23 @@ def integrity_test_page():
     """完整性测试页面"""
     if 'data_info' not in session:
         return redirect(url_for('upload_page'))
-    return render_template('integrity-test.html')
+
+    # 检查方向字段是否已映射（mapped_fields 可能是列表或字典）
+    data_info = session.get('data_info', {})
+    mapped_fields = data_info.get('mapped_fields', {})
+    if isinstance(mapped_fields, list):
+        has_direction_field = any(
+            isinstance(f, dict) and f.get('name') == 'direction'
+            and f.get('original_name')
+            for f in mapped_fields
+        )
+    elif isinstance(mapped_fields, dict):
+        has_direction_field = bool(mapped_fields.get('direction'))
+    else:
+        has_direction_field = False
+
+    return render_template('integrity-test.html',
+                           has_direction_field=has_direction_field)
 
 @app.route('/api/upload-balance', methods=['POST'])
 def upload_balance_file():
@@ -399,6 +416,8 @@ def run_integrity_tests():
         data = request.get_json(silent=True) or {}
         reverse_cf = data.get('reverse_carry_forward', False)
         leaf_accts = data.get('leaf_accounts', False)
+        cf_account_code = data.get('cf_account_code', '4103')
+        cf_keywords = data.get('cf_keywords', ['结转', '损益'])
 
         engine = get_duckdb_engine()
         table_name = 'data' if engine.table_exists('data') else None
@@ -412,6 +431,8 @@ def run_integrity_tests():
             reverse_carry_forward=reverse_cf,
             leaf_accounts=leaf_accts,
             balance_snapshot_table='balance_integrity',
+            cf_account_code=cf_account_code,
+            cf_keywords=cf_keywords,
         )
 
         session['integrity_results'] = results
@@ -441,6 +462,8 @@ def export_integrity_results():
         data = request.get_json(silent=True) or {}
         reverse_cf = data.get('reverse_carry_forward', False)
         leaf_accts = data.get('leaf_accounts', False)
+        cf_account_code = data.get('cf_account_code', '4103')
+        cf_keywords = data.get('cf_keywords', ['结转', '损益'])
 
         # 获取 DuckDB 引擎
         engine = get_duckdb_engine()
@@ -452,7 +475,8 @@ def export_integrity_results():
 
         # 通过 IntegrityChecker 生成数据（DuckDB SQL 聚合）
         checker = IntegrityChecker(engine, journal_table=table_name, balance_table=balance_table)
-        report = checker.export_report(reverse_carry_forward=reverse_cf, leaf_accounts=leaf_accts)
+        report = checker.export_report(reverse_carry_forward=reverse_cf, leaf_accounts=leaf_accts,
+                                        cf_account_code=cf_account_code, cf_keywords=cf_keywords)
 
         import io
         import openpyxl
@@ -2213,6 +2237,65 @@ def api_report_reconciliation_ai_analyze():
         return jsonify({'success': False, 'error': f'分析失败: {e}'})
 
 
+@app.route('/api/report-reconciliation/optimize', methods=['POST'])
+def api_report_reconciliation_optimize():
+    """
+    贪心爬山优化：基于当前映射 + 差异结果，自动调整科目→报表项目映射
+    以最小化总绝对差异为目标，尝试单科目移动和跨项目交换。
+    """
+    data = request.get_json()
+    mappings = data.get('mappings', [])
+    if not mappings:
+        return jsonify({'success': False, 'error': '缺少映射数据'})
+
+    # 提取报表数据
+    report_data_list = data.get('report_data_list')
+    if report_data_list and len(report_data_list) > 0:
+        combined_rows = []
+        for rd in report_data_list:
+            if rd.get('data'):
+                combined_rows.extend(rd['data'])
+        report_data = {
+            'success': True,
+            'data': combined_rows,
+            'columns': report_data_list[0].get('columns', []),
+            'report_type': 'combined',
+            'row_count': len(combined_rows),
+        }
+    else:
+        filepath = session.get('report_filepath')
+        sheet_name = data.get('sheet_name', '')
+        detection_meta = data.get('detection_meta', {})
+        if not filepath or not os.path.exists(filepath):
+            return jsonify({'success': False, 'error': '请先上传文件'})
+        from modules.report_cleaner import ReportCleaner
+        cleaner = ReportCleaner()
+        cleaner.load_file(filepath)
+        report_data = cleaner.extract_by_meta(sheet_name, detection_meta)
+        if not report_data.get("success"):
+            return jsonify(report_data)
+
+    try:
+        from modules.report_reconciliation import ReconciliationEngine
+        engine = get_duckdb_engine()
+        balance_info = session.get('balance_data_info', {})
+        balance_fields = balance_info.get('mapped_fields', balance_info.get('fields', []))
+        balance_table = 'balance_integrity' if engine.table_exists('balance_integrity') else 'balance_data'
+
+        reconciler = ReconciliationEngine(
+            db_cursor=engine._conn,
+            balance_fields=balance_fields,
+            balance_table=balance_table,
+        )
+
+        result = reconciler.optimize_mappings(mappings, report_data)
+        return jsonify(result)
+
+    except Exception as e:
+        app.logger.error(f"[RECONCILE-OPTIMIZE] {e}")
+        return jsonify({'success': False, 'error': f'优化失败: {e}'})
+
+
 @app.route('/api/upload/preview', methods=['POST'])
 def upload_file_preview():
     """API: 上传文件并预览结构（检测 sheet 和原始行），不进行数据解析"""
@@ -3177,17 +3260,72 @@ def allowed_file(filename):
 def _get_dify_client():
     """获取主 Dify Workflow 客户端（SQL生成、字段映射、报表清洗等）
 
-    配置在 config.py 的 DIFY_MAIN_* 变量中，修改后重启应用生效。
+    如设置了环境变量 DEEPSEEK_API_KEY，则使用 DeepSeek 直连兜底（不依赖 Dify）。
+    否则使用 config.py 中配置的 DIFY_MAIN_* 连接 Dify。
     """
-    return DifyClient(Config.DIFY_MAIN_BASE_URL, Config.DIFY_MAIN_API_KEY)
+    deepseek_key = os.environ.get('DEEPSEEK_API_KEY')
+    if deepseek_key:
+        return _DirectAPIClient(api_key=deepseek_key)
+
+    if Config.DIFY_MAIN_BASE_URL and Config.DIFY_MAIN_API_KEY:
+        return DifyClient(Config.DIFY_MAIN_BASE_URL, Config.DIFY_MAIN_API_KEY)
+    return None
 
 
 def _get_review_dify_client():
     """获取复核 Dify Workflow 客户端（SQL 代码复核审查）
 
-    配置在 config.py 的 DIFY_REVIEW_* 变量中，修改后重启应用生效。
+    如设置了环境变量 DEEPSEEK_API_KEY，则使用 DeepSeek 直连兜底。
+    否则使用 config.py 中配置的 DIFY_REVIEW_* 连接 Dify。
     """
-    return DifyClient(Config.DIFY_REVIEW_BASE_URL, Config.DIFY_REVIEW_API_KEY)
+    deepseek_key = os.environ.get('DEEPSEEK_API_KEY')
+    if deepseek_key:
+        return _DirectAPIClient(api_key=deepseek_key)
+
+    if Config.DIFY_REVIEW_BASE_URL and Config.DIFY_REVIEW_API_KEY:
+        return DifyClient(Config.DIFY_REVIEW_BASE_URL, Config.DIFY_REVIEW_API_KEY)
+    return None
+
+
+class _DirectAPIClient:
+    """OpenAI 兼容 API 直连客户端，与 DifyClient 接口兼容"""
+
+    def __init__(self, api_key: str, base_url: str = None, model: str = None):
+        self.api_key = api_key
+        self.base_url = (base_url or os.environ.get('DIRECT_API_URL',
+                         'https://api.deepseek.com')).rstrip('/')
+        self.model = model or os.environ.get('DIRECT_MODEL', 'deepseek-chat')
+
+    def chat(self, system_prompt: str, user_prompt: str, timeout: int = 60) -> str:
+        try:
+            resp = requests.post(
+                f"{self.base_url}/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 4096,
+                    "stream": False,
+                },
+                timeout=timeout,
+            )
+            if resp.status_code != 200:
+                raise Exception(f"API 返回错误 ({resp.status_code}): {resp.text[:300]}")
+            data = resp.json()
+            return data['choices'][0]['message']['content']
+        except requests.exceptions.Timeout:
+            raise Exception("API 请求超时，请稍后重试")
+        except requests.exceptions.ConnectionError:
+            raise Exception("无法连接 API 服务，请检查网络")
+        except Exception as e:
+            raise Exception(f"API 调用失败: {e}")
 
 
 def cleanup_stale_files():

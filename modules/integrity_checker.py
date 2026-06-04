@@ -236,14 +236,18 @@ class IntegrityChecker:
                 pass
         self._cf_setup_done = False
 
-    def _setup_carry_forward_views(self):
+    def _setup_carry_forward_views(self, cf_account_code: str = '4103',
+                                     cf_keywords: list = None):
         """
         创建反结转临时视图。
-        优先按科目编号=4103识别结转损益凭证，若无4103则按摘要含"结转"且"损益"识别。
+        通过 cf_account_code 指定结转损益科目编号（默认 4103），
+        通过 cf_keywords 指定摘要关键词（默认 ["结转", "损益"]）。
         """
         if self._cf_setup_done:
             return
         self._drop_cf_views()
+
+        cf_keywords = cf_keywords or ['结转', '损益']
 
         schema = self._get_schema(self.journal_table)
         has_account_code = '科目编号' in schema
@@ -254,12 +258,17 @@ class IntegrityChecker:
 
         jt = self.journal_table
 
-        # 构建 WHERE 条件：4103科目 OR 摘要同时包含"结转"和"损益"
+        # 构建 WHERE 条件：用户指定的科目编号 OR 摘要包含用户指定的关键词
         conditions = []
-        if has_account_code:
-            conditions.append('CAST("科目编号" AS VARCHAR) = \'4103\'')
-        if has_summary:
-            conditions.append('("摘要" LIKE \'%结转%\' AND "摘要" LIKE \'%损益%\')')
+        if has_account_code and cf_account_code:
+            conditions.append(f'CAST("科目编号" AS VARCHAR) = \'{cf_account_code}\'')
+        if has_summary and cf_keywords:
+            kw_parts = [f'"摘要" LIKE \'%{kw.strip()}%\''
+                       for kw in cf_keywords if kw.strip()]
+            if len(kw_parts) >= 2:
+                conditions.append('(' + ' AND '.join(kw_parts) + ')')
+            elif len(kw_parts) == 1:
+                conditions.append(kw_parts[0])
 
         if not conditions:
             raise ValueError("序时账缺少「科目编号」字段（4103）且无「摘要」字段，无法执行反结转")
@@ -616,13 +625,17 @@ class IntegrityChecker:
     # ========== 导出报告（供 app.py 调用） ==========
 
     def export_report(self, reverse_carry_forward: bool = False,
-                      leaf_accounts: bool = False) -> dict:
+                      leaf_accounts: bool = False,
+                      cf_account_code: str = '4103',
+                      cf_keywords: list = None) -> dict:
         """
         生成三个 Sheet 的导出数据。
 
         Args:
             reverse_carry_forward: 是否应用反结转
             leaf_accounts: 是否仅用末级科目
+            cf_account_code: 反结转科目编号（默认 4103）
+            cf_keywords: 反结转摘要关键词列表（默认 ["结转", "损益"]）
 
         Returns:
             {
@@ -660,7 +673,8 @@ class IntegrityChecker:
         # 再反结转
         if reverse_carry_forward and self.balance_table and self._table_exists(self.journal_table):
             try:
-                self._setup_carry_forward_views()
+                self._setup_carry_forward_views(cf_account_code=cf_account_code,
+                                                 cf_keywords=cf_keywords)
                 self.journal_table = 'journal_filtered'
                 self.balance_table = 'balance_adjusted'
                 cf_info = self.get_cf_info()
@@ -978,7 +992,9 @@ class IntegrityChecker:
 
     def run_all(self, reverse_carry_forward: bool = False,
                 leaf_accounts: bool = False,
-                balance_snapshot_table: str = None) -> Dict[str, Any]:
+                balance_snapshot_table: str = None,
+                cf_account_code: str = '4103',
+                cf_keywords: list = None) -> Dict[str, Any]:
         """
         运行全部完整性测试。
 
@@ -986,6 +1002,8 @@ class IntegrityChecker:
             reverse_carry_forward: 是否应用反结转（金蝶/用友模式）
             leaf_accounts: 是否仅用末级科目（从科目余额表中筛选末级科目）
             balance_snapshot_table: 非空时，在清理前将最终科目余额表快照到该表名
+            cf_account_code: 反结转科目编号（默认 4103）
+            cf_keywords: 反结转摘要关键词列表（默认 ["结转", "损益"]）
         """
         orig_jt = self.journal_table
         orig_bt = self.balance_table
@@ -1011,7 +1029,8 @@ class IntegrityChecker:
         # 再应用反结转（在末级科目之上继续调整）
         if reverse_carry_forward and self.balance_table and self._table_exists(self.journal_table):
             try:
-                self._setup_carry_forward_views()
+                self._setup_carry_forward_views(cf_account_code=cf_account_code,
+                                                 cf_keywords=cf_keywords)
                 self.journal_table = 'journal_filtered'
                 self.balance_table = 'balance_adjusted'
                 cf_info = self.get_cf_info()

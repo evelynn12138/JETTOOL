@@ -13,7 +13,8 @@
 
 import re
 import json as json_module
-from typing import Optional
+import copy
+from typing import Optional, List
 from difflib import SequenceMatcher
 
 
@@ -215,9 +216,10 @@ class ReconciliationEngine:
             if not report_item:
                 unmatched.append(mapped_row)
 
-        # AI 兜底（只补未匹配的）
+        # AI 兜底（只补未匹配的，附带附近已匹配的映射模式供参考）
         if unmatched and dify_client:
-            ai_result = self._ai_fallback(unmatched, report_items, dify_client)
+            ai_result = self._ai_fallback(unmatched, report_items, dify_client,
+                                          all_rows=rows_with_mapping)
             for code_key, report_item in ai_result.items():
                 for rw in rows_with_mapping:
                     if rw["account_code"] == code_key:
@@ -327,15 +329,380 @@ class ReconciliationEngine:
         comparison.sort(key=lambda x: abs(x["diff"]), reverse=True)
         stats = self._calc_stats(comparison)
 
+        # 将映射数据格式化为 balance_data（供导出等下游使用）
+        balance_data = []
+        for m in mappings:
+            balance_data.append({
+                "account_code": m.get("account_code", ""),
+                "account_name": m.get("account_name", ""),
+                "ending_balance": self._parse_amount(m.get("ending_balance", 0)),
+                "report_item": m.get("report_item", "").strip() or "",
+            })
+
         return {
             "success": True,
             "comparison": comparison,
             "stats": stats,
+            "balance_data": balance_data,
+        }
+
+    # ══════════════════════════════════════════════════════════
+    #  优化引擎（贪心爬山 + 局部交换）
+    # ══════════════════════════════════════════════════════════
+
+    def optimize_mappings(self, mappings: list,
+                          report_data: dict = None) -> dict:
+        """
+        基于第一版核对结果，用贪心爬山算法优化科目→报表项目映射。
+        目标：最小化总绝对差异 Σ |余额表汇总金额 - 报表金额|
+
+        算法流程:
+          1. 预计算每个科目的候选报表项目列表
+          2. 计算当前总绝对差异
+          3. 对每个科目尝试每个候选 → 选择使总差异减少最多的单次移动
+          4. 检测跨项目的交换对（两个科目互换报表项目能否共同减差异）
+          5. 重复 3~4 直到连续 N 轮无改善
+
+        Args:
+            mappings: [{account_code, account_name, ending_balance, report_item}, ...]
+            report_data: 报表数据（含 data 列表）
+
+        Returns:
+            {
+                success: bool,
+                optimized_mappings: [...],  # 优化后的映射
+                comparison: [...],          # 优化后的核对结果
+                stats: {...},              # 优化后的统计
+                changes: [{account_code, account_name, from, to, reason}],  # 变更记录
+                metrics: {initial_diff, final_diff, improvement_pct, iterations},
+            }
+        """
+        report_rows = report_data.get("data", []) if report_data else self._report_rows_cache
+        if not report_rows:
+            return {"success": False, "error": "报表数据为空"}
+
+        report_items = self._extract_report_items(report_rows)
+
+        # ── 1. 深层复制 mappings，优化过程不影响原始数据 ──
+        optimized = copy.deepcopy(mappings)
+
+        # ── 2. 预计算每个科目的候选列表 ──
+        # key = account_code|account_name, value = [report_item, ...]
+        candidates_map = {}
+        for m in optimized:
+            code = str(m.get("account_code", ""))
+            name = str(m.get("account_name", ""))
+            key = f"{code}|{name}"
+            # 当前映射
+            current = m.get("report_item", "").strip()
+            # 生成候选（含分数）
+            scored = self._generate_candidates(code, name, report_items, top_n=15)
+            cands = [item for item, _ in scored]
+            # 确保当前映射在最前面（如果不在候选里）
+            if current and current not in cands:
+                cands.insert(0, current)
+            elif current and cands and cands[0] != current:
+                # 把当前映射提到最前面（优先级最高）
+                cands = [current] + [c for c in cands if c != current]
+            candidates_map[key] = cands
+
+        # ── 3. 工具函数: 计算分组汇总和总绝对差异 ──
+        def _calc_grouped(mappings_list):
+            """返回 grouped_map {item: total} 和各项的 report_amount"""
+            grouped = {}
+            for m in mappings_list:
+                item = m.get("report_item", "").strip()
+                amt = self._parse_amount(m.get("ending_balance", 0))
+                if not item:
+                    # 未映射的科目单独统计
+                    item = "__unmatched__"
+                if item not in grouped:
+                    grouped[item] = 0
+                grouped[item] += amt
+
+            # 找报表金额
+            report_amounts = {}
+            for rrow in report_rows:
+                rname = rrow.get("项目名称", list(rrow.values())[0] if rrow else "")
+                if rname:
+                    report_amounts[rname] = self._parse_report_amount(rrow)
+
+            return grouped, report_amounts
+
+        def _total_diff(grouped, report_amounts):
+            diff = 0.0
+            # 各项目的差异
+            for item, total in grouped.items():
+                if item == "__unmatched__":
+                    diff += abs(total)
+                    continue
+                target = report_amounts.get(item, 0)
+                diff += abs(abs(total) - abs(target))
+            # 报表有但余额表无映射的项目
+            mapped_items = {k for k in grouped if k != "__unmatched__"}
+            for ri, amt in report_amounts.items():
+                if ri not in mapped_items and amt:
+                    diff += abs(amt)
+            return round(diff, 2)
+
+        # ── 4. 计算初始总差异 ──
+        init_grouped, init_ra = _calc_grouped(optimized)
+        initial_diff = _total_diff(init_grouped, init_ra)
+        best_diff = initial_diff
+
+        # ── 4a. 找出已匹配一致的项目，锁定其下的科目（优化不动） ──
+        locked_indices = set()
+        for item, total in init_grouped.items():
+            if item == "__unmatched__":
+                continue
+            target = init_ra.get(item, 0)
+            if abs(abs(total) - abs(target)) <= 0.01:
+                # 这个项目余额表汇总 ≈ 报表金额，锁定其所有科目
+                for idx, m in enumerate(optimized):
+                    if m.get("report_item", "").strip() == item:
+                        locked_indices.add(idx)
+
+        change_log = []
+
+        # ── 5. 主循环：贪心爬山 + 局部交换 ──
+        for iteration in range(15):  # 最多 15 轮
+            improved = False
+
+            # ── 5a. 单科目移动 ──
+            best_move = None  # (idx, target_item, new_diff)
+            for idx, m in enumerate(optimized):
+                # ⛔ 已匹配一致的科目不动
+                if idx in locked_indices:
+                    continue
+
+                code = str(m.get("account_code", ""))
+                name = str(m.get("account_name", ""))
+                key = f"{code}|{name}"
+                cands = candidates_map.get(key, [])
+                old_item = m.get("report_item", "").strip()
+
+                # 跳过没有候选的科目
+                if not cands or (len(cands) == 1 and cands[0] == old_item):
+                    continue
+
+                for cand in cands:
+                    if cand == old_item:
+                        continue
+                    # 尝试移动
+                    m["report_item"] = cand
+                    g, ra = _calc_grouped(optimized)
+                    new_diff = _total_diff(g, ra)
+                    # 还原
+                    m["report_item"] = old_item
+
+                    if new_diff < best_diff - 0.005:  # 5分钱以上的改善
+                        best_diff = new_diff
+                        best_move = (idx, cand, old_item, new_diff, "单科目移动")
+
+            if best_move:
+                idx, cand, old_item, new_diff, reason = best_move
+                optimized[idx]["report_item"] = cand
+                change_log.append({
+                    "account_code": optimized[idx].get("account_code", ""),
+                    "account_name": optimized[idx].get("account_name", ""),
+                    "from": old_item,
+                    "to": cand,
+                    "reason": reason,
+                    "diff_before": round(best_diff_before := (initial_diff if iteration == 0 else best_diff_prev), 2),
+                    "diff_after": round(best_diff, 2),
+                })
+                best_diff_prev = best_diff
+                improved = True
+                continue  # 重新计算，然后进入下一轮
+
+            # ── 5b. 跨项目交换检测（处理贪心无法解决的"交换"场景） ──
+            # 先找出当前分组情况
+            g, ra = _calc_grouped(optimized)
+            diff_items = []
+            for item, total in g.items():
+                if item == "__unmatched__":
+                    continue
+                target = ra.get(item, 0)
+                d = abs(total) - abs(target)
+                if abs(d) > 0.01:
+                    diff_items.append((item, d))
+
+            # 尝试交换一对科目（来自不同项目、差异方向相反）
+            if len(diff_items) >= 2:
+                # 把科目按所属项目分组
+                accounts_by_item = {}
+                for m in optimized:
+                    item = m.get("report_item", "").strip()
+                    if item:
+                        key = f"{item}"
+                        if key not in accounts_by_item:
+                            accounts_by_item[key] = []
+                        accounts_by_item[key].append(m)
+
+                best_swap = None
+                # 只尝试差异方向相反的项目对
+                for i in range(len(diff_items)):
+                    for j in range(i + 1, len(diff_items)):
+                        item_a, diff_a = diff_items[i]
+                        item_b, diff_b = diff_items[j]
+                        # 差异方向相反才可能通过交换改善
+                        if (diff_a > 0 and diff_b < 0) or (diff_a < 0 and diff_b > 0):
+                            accts_a = accounts_by_item.get(item_a, [])
+                            accts_b = accounts_by_item.get(item_b, [])
+                            # 尝试每对科目交换
+                            for ma in accts_a:
+                                for mb in accts_b:
+                                    old_a = ma.get("report_item", "")
+                                    old_b = mb.get("report_item", "")
+                                    if old_a == old_b:
+                                        continue
+                                    # 交换
+                                    ma["report_item"] = item_b
+                                    mb["report_item"] = item_a
+                                    g2, ra2 = _calc_grouped(optimized)
+                                    swap_diff = _total_diff(g2, ra2)
+                                    # 还原
+                                    ma["report_item"] = old_a
+                                    mb["report_item"] = old_b
+
+                                    if swap_diff < best_diff - 0.01:
+                                        best_diff = swap_diff
+                                        best_swap = (ma, mb, old_a, old_b, item_a, item_b, swap_diff, "科目交换")
+
+                if best_swap:
+                    ma, mb, old_a, old_b, item_a, item_b, new_diff, reason = best_swap
+                    ma["report_item"] = item_b
+                    mb["report_item"] = item_a
+                    # 记录两次变更
+                    change_log.append({
+                        "account_code": ma.get("account_code", ""),
+                        "account_name": ma.get("account_name", ""),
+                        "from": old_a,
+                        "to": item_b,
+                        "reason": f"与{mb.get('account_code','')}交换",
+                        "diff_before": round(best_diff_prev if iteration > 0 else initial_diff, 2),
+                        "diff_after": round(best_diff, 2),
+                    })
+                    change_log.append({
+                        "account_code": mb.get("account_code", ""),
+                        "account_name": mb.get("account_name", ""),
+                        "from": old_b,
+                        "to": item_a,
+                        "reason": f"与{ma.get('account_code','')}交换",
+                        "diff_before": round(best_diff_prev if iteration > 0 else initial_diff, 2),
+                        "diff_after": round(best_diff, 2),
+                    })
+                    best_diff_prev = best_diff
+                    improved = True
+
+            if not improved:
+                break  # 没有改善，退出循环
+
+        # ── 6. 生成优化后的核对结果 ──
+        reconciled = self.reconcile_with_mappings(optimized, report_data)
+        comparison = reconciled.get("comparison", [])
+        stats = reconciled.get("stats", {})
+
+        final_diff = best_diff
+        improvement = initial_diff - final_diff
+        improvement_pct = round(improvement / initial_diff * 100, 1) if initial_diff > 0 else 0
+
+        return {
+            "success": True,
+            "optimized_mappings": optimized,
+            "comparison": comparison,
+            "stats": stats,
+            "changes": change_log,
+            "metrics": {
+                "initial_diff": initial_diff,
+                "final_diff": final_diff,
+                "improvement": round(improvement, 2),
+                "improvement_pct": improvement_pct,
+                "iterations": len(change_log) if change_log else 0,
+            },
         }
 
     # ══════════════════════════════════════════════════════════
     #  映射引擎
     # ══════════════════════════════════════════════════════════
+
+    def _generate_candidates(self, code: str, name: str,
+                             report_items: list, top_n: int = 15) -> list:
+        """
+        为一个科目生成多个候选报表项目名称（返回实际报表中的名称）。
+        取消当前 _map_one 的短路逻辑，收集所有可能的匹配结果。
+
+        Args:
+            code: 科目编号
+            name: 科目名称
+            report_items: 报表项目名称列表（实际值）
+            top_n: 最多返回 N 个候选
+
+        Returns:
+            [(report_item, score), ...] 按匹配度降序排列
+        """
+        candidates = []  # list of (item, score)
+        seen = set()
+        has_code_match = False  # 标记是否有科目编号前缀匹配
+
+        def _add(item, score):
+            if item and item not in seen:
+                candidates.append((item, score))
+                seen.add(item)
+
+        # ── 1. 科目编号前缀匹配（收集所有匹配，不只是最长前缀） ──
+        if code:
+            clean_code = re.sub(r'[－\-—\s.]', '', code)
+            prefixes = sorted(self.ACCOUNT_CODE_RULES.keys(), key=len, reverse=True)
+            for prefix in prefixes:
+                if clean_code.startswith(prefix):
+                    standard = self.ACCOUNT_CODE_RULES[prefix]
+                    actual = self._match_to_actual(standard, report_items)
+                    # 最长前缀给最高分，短前缀递减
+                    prefix_len_score = len(prefix) / 4.0
+                    _add(actual, 100 + prefix_len_score)
+                    has_code_match = True
+
+        # ── 2. 科目名称关键词匹配（收集所有匹配的关键词组） ──
+        name_lower = name.lower()
+        for keywords, standard_item in self.ACCOUNT_NAME_RULES:
+            if any(kw in name or kw in name_lower for kw in keywords):
+                actual = self._match_to_actual(standard_item, report_items)
+                # 分数按匹配关键词数量/深度
+                match_count = sum(1 for kw in keywords if kw in name or kw in name_lower)
+                _add(actual, 80 + match_count * 5)
+
+        # ── 3. 模糊匹配：科目名称 vs 报表项目名称 ──
+        if name:
+            # 如果科目编号已有预设规则匹配，模糊匹配门槛提高（防止窜到完全不相关的项目）
+            fuzzy_threshold = 0.60 if has_code_match else 0.45
+            norm_name = self._normalize_name(name)
+            for ri in report_items:
+                norm_ri = self._normalize_name(ri)
+                ratio = SequenceMatcher(None, norm_name, norm_ri).ratio()
+                # 加权：科目名含在报表名中加分
+                if norm_name in norm_ri:
+                    ratio += 0.15
+                # 报表名含在科目名中加分（部分匹配）
+                if norm_ri in norm_name and len(norm_ri) > 2:
+                    ratio += 0.10
+                if ratio >= fuzzy_threshold:
+                    _add(ri, 50 + ratio * 30)
+
+        # ── 4. 按分数降序排序 ──
+        candidates.sort(key=lambda x: -x[1])
+
+        # ── 5. 确保当前映射也在候选里（用空字符串占位，由调用方填充） ──
+        # 如果候选太少，补充一些未覆盖的报表项目（靠后的匹配）
+        if len(candidates) < top_n:
+            for ri in report_items:
+                if ri not in seen:
+                    candidates.append((ri, 0))
+                    seen.add(ri)
+                    if len(candidates) >= top_n * 2:
+                        break
+
+        return candidates[:top_n]
 
     def _map_one(self, code: str, name: str) -> Optional[str]:
         """规则映射一个科目到报表项目"""
@@ -430,13 +797,54 @@ class ReconciliationEngine:
     # ══════════════════════════════════════════════════════════
 
     def _ai_fallback(self, unmatched: list, report_items: list,
-                     dify_client) -> dict:
-        """通过 Dify 代理 AI 补全：返回 {account_code: report_item}"""
+                     dify_client, all_rows: list = None) -> dict:
+        """
+        通过 Dify 代理 AI 补全：返回 {account_code: report_item}
+
+        相比之前改进：
+        - 附带上下几个科目编号范围内已匹配科目的映射模式，帮助 AI 推断
+        - 结合科目名称判断
+        """
+        # ── 构建已匹配科目的上下文（按编号排序取附近匹配） ──
+        context_lines = []
+        if all_rows:
+            # 按科目编号排序
+            sorted_rows = sorted(
+                [r for r in all_rows if r.get("account_code")],
+                key=lambda r: r["account_code"]
+            )
+            # 对每个未匹配科目，找上下 3 个已匹配的科目供 AI 参考
+            for u in unmatched:
+                ucode = u.get("account_code", "") or ""
+                if not ucode:
+                    continue
+                neighbors = []
+                ucode_clean = re.sub(r'[－\-—\s.]', '', ucode)
+                # 找同一编号前缀范围的已匹配科目
+                prefix_len = min(4, len(ucode_clean))
+                u_prefix = ucode_clean[:prefix_len] if ucode_clean else ""
+                for r in sorted_rows:
+                    rcode = r.get("account_code", "")
+                    ritem = r.get("report_item", "").strip()
+                    if not rcode or not ritem:
+                        continue
+                    rcode_clean = re.sub(r'[－\-—\s.]', '', rcode)
+                    # 前缀相同或在附近
+                    if (u_prefix and rcode_clean.startswith(u_prefix)) or abs(len(rcode_clean) - len(ucode_clean)) <= 2:
+                        neighbors.append(f"    {rcode} {r.get('account_name','')} → {ritem}")
+                if neighbors:
+                    context_lines.append(f"  {ucode} {u.get('account_name','')}（附近已匹配参考:）")
+                    context_lines.extend(neighbors[:5])
+
         acct_lines = "\n".join(
             f"  - 科目编号: {u['account_code'] or '(无)'}, 科目名称: {u['account_name']}"
             for u in unmatched[:50]
         )
         item_lines = "\n".join(f"  - {n}" for n in report_items)
+
+        context_section = ""
+        if context_lines:
+            context_section = f"\n## 附近已匹配科目（供参考映射模式）\n{chr(10).join(context_lines)}\n"
 
         prompt = f"""你是一个会计科目映射专家。请将以下未匹配的科目映射到最合适的报表项目。
 
@@ -445,6 +853,11 @@ class ReconciliationEngine:
 
 ## 待匹配科目
 {acct_lines}
+{context_section}
+## 映射规则
+1. **优先参考「附近已匹配科目」的映射模式**：如果同编号前缀的科目都映射到了同一个报表项目，那当前科目也应该相同
+2. **其次根据科目名称判断**：科目名称中的关键词通常指向对应的报表项目
+3. **金额大小辅助判断**：大额科目通常对应主要报表项目
 
 返回 JSON 数组: [{{"code": "科目编号", "report_item": "报表项目名称"}}]
 如果无法匹配任何项目，report_item 设为空字符串。
