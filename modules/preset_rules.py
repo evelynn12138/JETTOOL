@@ -9,6 +9,7 @@ API 返回 packs + custom_rules 结构，前端按包分组展示。
 
 import json
 import os
+import sys
 import time
 import uuid
 from typing import Dict, List, Any, Optional
@@ -16,15 +17,70 @@ from typing import Dict, List, Any, Optional
 _APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RULES_FILE = os.path.join(_APP_ROOT, 'temp', 'preset_rules.json')
 
+# 内置默认规则（文件不存在时兜底使用）
+_DEFAULT_PACKS = [
+    {
+        "id": "general",
+        "name": "通用筛选规则",
+        "description": "基础数据质量与异常检测规则，适用于所有审计项目",
+        "source": "内置",
+        "is_builtin": True,
+        "rules": [
+            {
+                "id": "integer_amount_detection",
+                "name": "整数金额检测",
+                "description": "检测金额字段中金额为整数的记录，可能存在估算风险",
+                "category": "数据质量",
+                "sql_template": "SELECT * FROM \"data\" WHERE CAST(\"{amount_field}\" AS DOUBLE) = ROUND(CAST(\"{amount_field}\" AS DOUBLE))",
+                "params": [{"name": "amount_field", "label": "金额字段", "type": "field_selector", "default": "金额"}]
+            },
+            {
+                "id": "large_amount_transaction",
+                "name": "大额交易检测",
+                "description": "检测超过指定金额阈值的交易",
+                "category": "异常交易",
+                "sql_template": "SELECT * FROM \"data\" WHERE ABS(CAST(\"{amount_field}\" AS DOUBLE)) > {threshold} ORDER BY ABS(CAST(\"{amount_field}\" AS DOUBLE)) DESC",
+                "params": [{"name": "amount_field", "label": "金额字段", "type": "field_selector", "default": "金额"}, {"name": "threshold", "label": "阈值", "type": "number", "default": 1000000}]
+            },
+            {
+                "id": "negative_amount_detection",
+                "name": "负金额检测",
+                "description": "检测金额为负数的异常记录",
+                "category": "数据质量",
+                "sql_template": "SELECT * FROM \"data\" WHERE CAST(\"{amount_field}\" AS DOUBLE) < 0",
+                "params": [{"name": "amount_field", "label": "金额字段", "type": "field_selector", "default": "金额"}]
+            },
+            {
+                "id": "weekend_transaction",
+                "name": "节假日交易检测",
+                "description": "检测发生在周末的交易记录",
+                "category": "异常交易",
+                "sql_template": "SELECT * FROM \"data\" WHERE strftime('%w', CAST(\"{date_field}\" AS DATE)) IN ('0', '6')",
+                "params": [{"name": "date_field", "label": "日期字段", "type": "field_selector", "default": "日期"}]
+            },
+        ]
+    }
+]
+
 
 def _load_data() -> dict:
+    # 尝试从文件加载，文件不存在则使用内置默认规则
     if not os.path.exists(RULES_FILE):
-        return {'version': 2, 'packs': [], 'custom_rules': []}
+        # 也尝试在 frozen 模式下寻找文件（PyInstaller 的解压目录）
+        if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+            frozen_path = os.path.join(sys._MEIPASS, 'temp', 'preset_rules.json')
+            if os.path.exists(frozen_path):
+                try:
+                    with open(frozen_path, 'r', encoding='utf-8') as f:
+                        return json.load(f)
+                except (json.JSONDecodeError, IOError):
+                    pass
+        return {'version': 2, 'packs': _DEFAULT_PACKS, 'custom_rules': []}
     try:
         with open(RULES_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
     except (json.JSONDecodeError, IOError):
-        return {'version': 2, 'packs': [], 'custom_rules': []}
+        return {'version': 2, 'packs': _DEFAULT_PACKS, 'custom_rules': []}
 
 
 def _save_data(data: dict):
