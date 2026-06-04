@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>财务报表清洗 - DA数据清洗业务AI应用</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .upload-area {
+            border: 2px dashed #cbd5e1;
+            border-radius: 12px;
+            padding: 40px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: #fafbfc;
+            margin: 16px 0;
+        }
+        .upload-area:hover, .upload-area.dragover {
+            border-color: var(--yellow);
+            background: rgba(255, 231, 0, 0.05);
+        }
+        .upload-icon {
+            font-size: 48px;
+            color: #9ca3af;
+            margin-bottom: 12px;
+        }
+        .upload-area h3 {
+            font-size: 16px;
+            color: var(--black);
+            margin: 0 0 8px;
+        }
+        .upload-hint {
+            font-size: 13px;
+            color: var(--secondary-color);
+            margin: 4px 0;
+        }
+        .file-details {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            border-radius: 8px;
+            margin-top: 12px;
+        }
+        .file-details i { font-size: 24px; color: #16a34a; }
+        .file-details h4 { margin: 0; font-size: 14px; }
+        .file-details p { margin: 2px 0 0; font-size: 12px; color: var(--secondary-color); }
+
+        .section-card {
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 24px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .section-card.visible { display: block; }
+
+        .card-section-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .card-section-header i { font-size: 20px; color: var(--black); }
+        .card-section-header h3 { font-size: 16px; margin: 0; }
+
+        .detection-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin: 16px 0;
+        }
+        .detection-item {
+            padding: 12px 16px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 3px solid var(--yellow);
+        }
+        .detection-item .label { font-size: 12px; color: var(--secondary-color); }
+        .detection-item .value { font-size: 14px; font-weight: 600; margin-top: 2px; }
+
+        .col-mapping {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 12px 0;
+        }
+        .col-badge {
+            padding: 6px 12px;
+            background: var(--black);
+            color: var(--yellow);
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .col-badge .col-idx { color: rgba(255, 231, 0, 0.6); }
+        .col-badge .col-side { color: #9ca3af; }
+
+        .stats-row {
+            display: flex;
+            gap: 16px;
+            margin: 12px 0;
+            flex-wrap: wrap;
+        }
+        .stat-badge {
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            background: #f0fdf4;
+            color: #166534;
+        }
+        .stat-badge.warning { background: #fef3c7; color: #92400e; }
+        .stat-badge.danger { background: #fef2f2; color: #991b1b; }
+
+        .data-table-wrapper {
+            overflow-x: auto;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            max-height: 480px;
+            overflow-y: auto;
+        }
+        .preview-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .preview-table th, .preview-table td {
+            border: 1px solid #e2e8f0;
+            padding: 6px 10px;
+            text-align: left;
+            white-space: nowrap;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .preview-table th {
+            background: var(--black);
+            color: var(--yellow);
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+        .preview-table tr:nth-child(even) { background: #f8f9fa; }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #e5e7eb;
+            border-top-color: var(--black);
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .error-box {
+            padding: 12px 16px;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            color: #dc2626;
+            font-size: 14px;
+            margin: 12px 0;
+        }
+        .btn { padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s; }
+        .btn-primary { background: var(--black); color: var(--yellow); }
+        .btn-primary:hover { background: #1a2a3a; }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-secondary { background: #e5e7eb; color: var(--black); }
+        .btn-secondary:hover { background: #d1d5db; }
+        .btn-success { background: #166534; color: white; }
+        .btn-success:hover { background: #15803d; }
+
+        .section-card.config-card .config-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+        .config-select {
+            padding: 6px 12px;
+            font-size: 14px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            background: white;
+            min-width: 200px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="header-top">
+                <div class="header-left">
+                    <img src="/static/images/ey-logo.png" alt="EY" class="ey-logo">
+                    <a href="{{ url_for('index') }}" class="back-link"><i class="fas fa-arrow-left"></i></a>
+                    <i class="fas fa-file-invoice header-page-icon"></i>
+                    <h1>财务报表清洗</h1>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <!-- 加载状态 -->
+            <div id="global-loading" style="display:none;text-align:center;padding:40px;">
+                <div class="loading-spinner" style="width:40px;height:40px;border-width:3px;"></div>
+                <p style="margin-top:12px;color:var(--secondary-color);" id="global-loading-text">处理中...</p>
+            </div>
+
+            <!-- 卡片1: 上传文件 -->
+            <div class="section-card visible" id="card-upload">
+                <div class="card-section-header">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    <h3>第一步：上传报表文件</h3>
+                </div>
+                <p style="font-size:14px;color:var(--secondary-color);margin-bottom:16px;">
+                    上传资产负债表或利润表文件（支持 .xlsx / .xls），系统将自动识别格式。
+                </p>
+
+                <div class="upload-area" id="report-upload-area">
+                    <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                    <h3>拖拽文件到此处或点击上传</h3>
+                    <p class="upload-hint">支持 .xlsx / .xls 格式的财务报表</p>
+                    <input type="file" id="report-file-input" accept=".xlsx,.xls" style="display:none;">
+                    <button class="btn btn-primary" id="report-browse-btn" style="margin-top:8px;">
+                        <i class="fas fa-folder-open"></i> 选择文件
+                    </button>
+                    <div id="report-file-info" style="display:none;" class="file-details">
+                        <i class="fas fa-file-excel"></i>
+                        <div>
+                            <h4 id="report-file-name"></h4>
+                            <p id="report-file-size"></p>
+                        </div>
+                        <button class="btn btn-small" id="report-remove-file" style="margin-left:auto;padding:4px 8px;background:#fef2f2;border:none;border-radius:4px;cursor:pointer;">
+                            <i class="fas fa-times" style="color:#dc2626;"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 配置区域 -->
+                <div id="report-config-area" style="display:none;">
+                    <div class="config-row">
+                        <label><i class="fas fa-table"></i> 选择工作表 (Sheet):</label>
+                        <select id="report-sheet-select" class="config-select"></select>
+                    </div>
+                    <div style="margin-top:12px;text-align:right;">
+                        <button class="btn btn-primary" id="report-detect-btn">
+                            <i class="fas fa-magic"></i> AI 识别结构
+                        </button>
+                    </div>
+                </div>
+
+                <div class="error-box" id="upload-error" style="display:none;"></div>
+            </div>
+
+            <!-- 卡片2: AI检测结果 -->
+            <div class="section-card" id="card-detection">
+                <div class="card-section-header">
+                    <i class="fas fa-search"></i>
+                    <h3>第二步：AI 结构检测结果</h3>
+                </div>
+
+                <div id="detection-content">
+                    <div class="detection-grid" id="detection-grid"></div>
+
+                    <h4 style="margin:16px 0 8px;font-size:14px;">列映射:</h4>
+                    <div class="col-mapping" id="detection-cols"></div>
+
+                    <div class="detection-item" style="margin-top:12px;border-left-color:var(--secondary-color);">
+                        <div class="label">跳过关键词（含这些的行将被过滤）</div>
+                        <div class="value" id="detection-skip-keywords" style="font-size:13px;font-weight:normal;"></div>
+                    </div>
+                </div>
+
+                <div class="error-box" id="detection-error" style="display:none;"></div>
+
+                <div style="margin-top:16px;display:flex;gap:12px;">
+                    <button class="btn btn-primary" id="extract-btn">
+                        <i class="fas fa-check"></i> 确认并提取数据
+                    </button>
+                    <button class="btn btn-secondary" id="retry-detect-btn">
+                        <i class="fas fa-redo"></i> 重新检测
+                    </button>
+                </div>
+            </div>
+
+            <!-- 卡片3: 清洗结果预览 -->
+            <div class="section-card" id="card-results">
+                <div class="card-section-header">
+                    <i class="fas fa-table"></i>
+                    <h3>第三步：清洗后数据预览</h3>
+                </div>
+
+                <div class="stats-row" id="results-stats"></div>
+
+                <div class="data-table-wrapper">
+                    <table class="preview-table" id="results-table"></table>
+                </div>
+
+                <div class="error-box" id="extract-error" style="display:none;"></div>
+
+                <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap;">
+                    <button class="btn btn-success" id="export-btn">
+                        <i class="fas fa-file-excel"></i> 导出 Excel
+                    </button>
+                    <button class="btn btn-secondary" id="reset-btn">
+                        <i class="fas fa-undo"></i> 重新上传
+                    </button>
+                </div>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <p>© 2026 DA数据清洗业务AI应用 - 审计数据智能查询与分析工具 V1.0</p>
+            <p class="disclaimer">所有数据在本地处理，AI 检测仅发送原始数据的前10行用于格式识别。</p>
+        </footer>
+    </div>
+
+    <script src="/static/js/report-cleaner.js"></script>
+</body>
+</html>

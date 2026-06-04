@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>字段映射 - DA数据清洗业务AI应用</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .mapper-section-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+            font-size: 18px;
+            color: var(--black);
+        }
+        .mapper-section-title i {
+            font-size: 22px;
+        }
+        .mapper-section-title .section-required {
+            font-size: 11px;
+            background: rgba(239,68,68,0.1);
+            color: #ef4444;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-left: 8px;
+        }
+        .mapper-section-title .section-optional {
+            font-size: 11px;
+            background: rgba(107,114,128,0.1);
+            color: var(--secondary-color);
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-left: 8px;
+        }
+        .history-prefill-banner {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 18px;
+            margin-bottom: 18px;
+            background: rgba(255, 231, 0, 0.08);
+            border: 1px solid var(--yellow);
+            border-radius: 8px;
+            color: var(--black);
+            font-size: 14px;
+        }
+        .history-prefill-banner i {
+            font-size: 16px;
+        }
+
+        /* 置信度图标 */
+        .conf-icon {
+            margin-left: 4px;
+            font-size: 13px;
+            vertical-align: middle;
+        }
+        .conf-high { color: var(--black); font-weight: 700; }
+        .conf-medium { color: #f59e0b; }
+        .conf-low { color: #ef4444; }
+
+        /* 映射工具栏 */
+        .mapping-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid #e5e7eb;
+        }
+        .integrity-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            font-size: 10px;
+            background: rgba(245, 158, 11, 0.12);
+            color: #b45309;
+            padding: 1px 6px;
+            border-radius: 8px;
+            margin-left: 4px;
+            font-weight: 500;
+        }
+        .integrity-badge i {
+            font-size: 9px;
+        }
+        .filter-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--secondary-color);
+            cursor: pointer;
+            margin-left: auto;
+            user-select: none;
+        }
+        .filter-checkbox input[type="checkbox"] {
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="header-top">
+                <div class="header-left">
+                    <img src="/static/images/ey-logo.png" alt="EY" class="ey-logo">
+                    <a href="{{ url_for('api_config_page') }}" class="back-link">
+                        <i class="fas fa-arrow-left"></i>
+                    </a>
+                    <i class="fas fa-project-diagram header-page-icon"></i>
+                    <h1>字段映射</h1>
+                </div>
+            </div>
+            <div class="steps">
+                <div class="step completed">
+                    <span class="step-number">1</span>
+                    <span class="step-text">上传文件</span>
+                </div>
+                <div class="step completed">
+                    <span class="step-number">2</span>
+                    <span class="step-text">API配置</span>
+                </div>
+                <div class="step active">
+                    <span class="step-number">3</span>
+                    <span class="step-text">字段映射</span>
+                </div>
+                <div class="step">
+                    <span class="step-number">4</span>
+                    <span class="step-text">完整性测试</span>
+                </div>
+                <div class="step">
+                    <span class="step-number">5</span>
+                    <span class="step-text">查询分析</span>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <!-- ====== 序时账字段映射 ====== -->
+            <div class="mapper-card">
+                <div class="mapper-header">
+                    <div class="mapper-section-title">
+                        <i class="fas fa-cogs" style="color:var(--yellow);"></i>
+                        <span>序时账字段映射</span>
+                        <span class="section-required">必要</span>
+                    </div>
+                    <p class="mapper-description">
+                        系统已自动识别您的序时账数据字段，请核对并映射到标准字段。不管被审计单位的数据格式长什么样，只需确认一次即可。
+                    </p>
+                </div>
+
+                <div class="data-preview">
+                    <h4><i class="fas fa-table"></i> 序时账数据预览 (前{{ data_info.preview|length }}行)</h4>
+                    <div class="preview-table-container">
+                        <table class="preview-table">
+                            <thead>
+                                <tr>
+                                    {% for field in data_info.fields %}
+                                    <th>{{ field.name }}</th>
+                                    {% endfor %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in data_info.preview %}
+                                <tr>
+                                    {% for field in data_info.fields %}
+                                    <td>{{ row[field.name] }}</td>
+                                    {% endfor %}
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="field-mapping">
+                    <h4><i class="fas fa-exchange-alt"></i> 序时账字段映射配置</h4>
+                    <p class="mapper-hint">
+                        请将您的数据字段映射到系统标准字段。系统已根据关键词自动推荐映射关系。
+                        <br><strong>科目编号、凭证号</strong>为必填字段。若数据不含金额但有借方和贷方，系统将自动计算<strong>金额 = 借方 - 贷方</strong>。
+                    </p>
+
+                    <div class="mapping-table-container">
+                        <table class="mapping-table">
+                            <thead>
+                                <tr>
+                                    <th>系统标准字段</th>
+                                    <th>字段说明</th>
+                                    <th>映射到您的字段</th>
+                                    <th>数据类型</th>
+                                    <th>样本值</th>
+                                </tr>
+                            </thead>
+                            <tbody id="journal-mapping-body">
+                                <!-- 通过JavaScript动态生成 -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="mapping-toolbar">
+                        <button class="btn btn-small" id="ai-auto-map-btn" style="background: var(--yellow); color: var(--black); border: none;" onclick="aiAutoMap('journal', 'ai-auto-map-btn')">
+                            <i class="fas fa-robot"></i> AI 智能映射
+                        </button>
+                        <button class="btn btn-small" id="reset-btn">
+                            <i class="fas fa-undo"></i> 重置
+                        </button>
+                        <label class="filter-checkbox" title="仅显示未映射或低置信度的字段">
+                            <input type="checkbox" id="low-confidence-filter">
+                            <i class="fas fa-filter"></i> 仅显示低置信度
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ====== 科目余额表字段映射（可选） ====== -->
+            {% if has_balance_data %}
+            <div class="mapper-card" style="margin-top: 24px;">
+                <div class="mapper-header">
+                    <div class="mapper-section-title">
+                        <i class="fas fa-balance-scale" style="color:var(--black);"></i>
+                        <span>科目余额表字段映射</span>
+                        <span class="section-optional">可选</span>
+                    </div>
+                    <p class="mapper-description">
+                        系统已自动识别您的科目余额表数据字段，请核对并映射到标准字段，以便进行完整性交叉验证。
+                    </p>
+                </div>
+
+                <div class="data-preview">
+                    <h4><i class="fas fa-table"></i> 科目余额表数据预览 (前{{ balance_data_info.preview|length }}行)</h4>
+                    <div class="preview-table-container">
+                        <table class="preview-table">
+                            <thead>
+                                <tr>
+                                    {% for field in balance_data_info.fields %}
+                                    <th>{{ field.name }}</th>
+                                    {% endfor %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in balance_data_info.preview %}
+                                <tr>
+                                    {% for field in balance_data_info.fields %}
+                                    <td>{{ row[field.name] }}</td>
+                                    {% endfor %}
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="field-mapping">
+                    <h4><i class="fas fa-exchange-alt"></i> 科目余额表字段映射配置</h4>
+
+                    <!-- 余额表格式选择 -->
+                    <div class="balance-format-selector" style="background:var(--light-gray);padding:16px;border-radius:var(--radius);margin-bottom:16px;">
+                        <label style="font-weight:600;display:block;margin-bottom:8px;">
+                            <i class="fas fa-cog"></i> 科目余额表数据格式
+                        </label>
+                        <label style="display:block;margin:4px 0;cursor:pointer;">
+                            <input type="radio" name="balance-format" value="calculated" checked onchange="onBalanceFormatChange('calculated')">
+                            已有期初余额、期末余额字段（直接映射）
+                        </label>
+                        <label style="display:block;margin:4px 0;cursor:pointer;">
+                            <input type="radio" name="balance-format" value="debit_credit" onchange="onBalanceFormatChange('debit_credit')">
+                            期初/期末只有借方和贷方，需计算（期初余额 = 期初借方 - 期初贷方，期末余额 = 期末借方 - 期末贷方）
+                        </label>
+                    </div>
+
+                    <p class="mapper-hint" id="balance-hint-text">
+                        请将您的科目余额表字段映射到系统标准字段。<strong>科目编号、期初余额、期末余额</strong>为必填字段。
+                    </p>
+
+                    <div class="mapping-table-container">
+                        <table class="mapping-table">
+                            <thead>
+                                <tr>
+                                    <th>系统标准字段</th>
+                                    <th>字段说明</th>
+                                    <th>映射到您的字段</th>
+                                    <th>数据类型</th>
+                                    <th>样本值</th>
+                                </tr>
+                            </thead>
+                            <tbody id="balance-mapping-body">
+                                <!-- 通过JavaScript动态生成 -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="mapping-toolbar">
+                        <button class="btn btn-small" id="ai-auto-map-balance-btn" style="background: var(--yellow); color: var(--black); border: none;" onclick="aiAutoMap('balance', 'ai-auto-map-balance-btn')">
+                            <i class="fas fa-robot"></i> AI 智能映射
+                        </button>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- 底部操作按钮 -->
+            <div class="action-buttons">
+                <button class="btn btn-secondary" onclick="window.location.href='{{ url_for('api_config_page') }}'">
+                    <i class="fas fa-arrow-left"></i> 返回上一步
+                </button>
+                <button class="btn btn-primary" id="save-mapping-btn">
+                    <i class="fas fa-check"></i> 保存映射并继续
+                </button>
+            </div>
+
+            <div class="loading-overlay" id="loading-overlay" style="display: none;">
+                <div class="loading-content">
+                    <div class="spinner"></div>
+                    <h3>正在保存字段映射...</h3>
+                    <p>请稍候，系统正在处理您的配置</p>
+                </div>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <p>© 2026 DA数据清洗业务AI应用 - 审计数据智能查询与分析工具 V1.0</p>
+            <p class="disclaimer">提示：字段映射决定了后续查询分析的准确性，请仔细核对。</p>
+        </footer>
+    </div>
+
+    <script>
+        // ===== 序时账标准字段定义 =====
+        const standardFields = [
+            { id: 'date', name: '日期', description: '交易发生日期', type: 'date', required: true },
+            { id: 'summary', name: '摘要', description: '交易内容摘要', type: 'text', required: true },
+            { id: 'account_code', name: '科目编号', description: '会计科目编号', type: 'text', required: true },
+            { id: 'subject', name: '科目名称', description: '会计科目名称', type: 'text', required: true },
+            { id: 'company', name: '公司名', description: '公司名称', type: 'text', required: false },
+            { id: 'debit', name: '借方', description: '借方金额', type: 'number', required: false },
+            { id: 'credit', name: '贷方', description: '贷方金额', type: 'number', required: false },
+            { id: 'amount', name: '金额', description: '交易发生额（有借贷方时自动计算）', type: 'number', required: false },
+            { id: 'voucher_no', name: '凭证号', description: '凭证编号', type: 'text', required: true },
+            { id: 'department', name: '部门', description: '所属部门', type: 'text', required: false },
+            { id: 'person', name: '制单人', description: '制单人员', type: 'text', required: false },
+            { id: 'direction', name: '方向', description: '借贷方向（影响完整性测试金额正负）', type: 'text', required: false }
+        ];
+
+        // ===== 科目余额表字段定义（含格式分组） =====
+        // format: 'all'=始终显示, 'calculated'=已有期初/期末, 'debit_credit'=借贷方计算
+        const balanceStandardFields = [
+            { id: 'company', name: '公司名', description: '公司名称', type: 'text', required: true, format: 'all' },
+            { id: 'account_code', name: '科目编号', description: '会计科目编号', type: 'text', required: true, format: 'all' },
+            { id: 'account_name', name: '科目名称', description: '会计科目名称', type: 'text', required: true, format: 'all' },
+            // 模式A：已有期初/期末
+            { id: 'beginning', name: '期初余额', description: '期初余额', type: 'number', required: true, format: 'calculated' },
+            { id: 'ending', name: '期末余额', description: '期末余额', type: 'number', required: true, format: 'calculated' },
+            { id: 'beginning_direction', name: '期初余额方向', description: '期初余额借贷方向（已有余额时影响方向调整）', type: 'text', required: false, format: 'calculated' },
+            { id: 'ending_direction', name: '期末余额方向', description: '期末余额借贷方向（已有余额时影响方向调整）', type: 'text', required: false, format: 'calculated' },
+            // 模式B：借贷方计算
+            { id: 'beginning_debit', name: '期初借方', description: '期初借方余额', type: 'number', required: true, format: 'debit_credit' },
+            { id: 'beginning_credit', name: '期初贷方', description: '期初贷方余额', type: 'number', required: true, format: 'debit_credit' },
+            { id: 'ending_debit', name: '期末借方', description: '期末借方余额', type: 'number', required: true, format: 'debit_credit' },
+            { id: 'ending_credit', name: '期末贷方', description: '期末贷方余额', type: 'number', required: true, format: 'debit_credit' }
+        ];
+
+        // ===== 当前格式选择（默认：已有期初期末） =====
+        let balanceFormat = '{{ balance_format }}';
+
+        function getBalanceFields() {
+            return balanceStandardFields.filter(f => f.format === 'all' || f.format === balanceFormat);
+        }
+
+        function onBalanceFormatChange(format) {
+            balanceFormat = format;
+            // 重新渲染映射表
+            const recResult = recommendBalanceMapping();
+            const recMapping = recResult.mapping;
+            const conf = recResult.confidence;
+            renderMappingTable('balance-mapping-body', balanceUserFields, getBalanceFields(), recMapping, balanceUserFields, conf);
+            // 更新提示文字
+            const hint = document.getElementById('balance-hint-text');
+            if (format === 'debit_credit') {
+                hint.innerHTML = '请将借贷方字段映射到系统标准字段。<strong>科目编号、期初借方、期初贷方、期末借方、期末贷方</strong>为必填字段。系统将自动计算期初余额=期初借方-期初贷方，期末余额=期末借方-期末贷方。';
+            } else {
+                hint.innerHTML = '请将您的科目余额表字段映射到系统标准字段。<strong>科目编号、期初余额、期末余额</strong>为必填字段。';
+            }
+        }
+
+        // ===== 数据 =====
+        const userFields = {{ data_info.fields|tojson }};
+        const previewData = {{ data_info.preview|tojson }};
+
+        // 预填映射（来自历史记录）
+        {% if prefilled_journal_mapping %}
+        const prefilledJournalMapping = {{ prefilled_journal_mapping|tojson }};
+        {% else %}
+        const prefilledJournalMapping = null;
+        {% endif %}
+        {% if prefilled_balance_mapping %}
+        const prefilledBalanceMapping = {{ prefilled_balance_mapping|tojson }};
+        {% else %}
+        const prefilledBalanceMapping = null;
+        {% endif %}
+
+        {% if has_balance_data %}
+        const hasBalance = true;
+        const balanceUserFields = {{ balance_data_info.fields|tojson }};
+        const balancePreviewData = {{ balance_data_info.preview|tojson }};
+        {% else %}
+        const hasBalance = false;
+        const balanceUserFields = [];
+        const balancePreviewData = [];
+        {% endif %}
+
+        // ===== 智能推荐映射（序时账） =====
+        function recommendJournalMapping() {
+            const mapping = {};
+            const confidence = {};
+            const keywordMap = {
+                '日期': ['日期', 'date', '时间', '交易日期', '记账日期', '生效日期'],
+                '摘要': ['摘要', 'summary', '内容', '说明', '描述', '备注'],
+                '科目编号': ['科目编号', '科目代码', 'account code', 'account_code', '科目编码', '编码', 'code', '编号'],
+                '科目名称': ['科目', 'subject', '账户', '会计科目', '科目名称', 'account'],
+                '公司名': ['公司', '公司名', '公司名称', '企业', '单位', 'company', 'entity'],
+                '借方': ['借方', 'debit', '支出', '付款', '借'],
+                '贷方': ['贷方', 'credit', '收入', '收款', '贷'],
+                '金额': ['金额', 'amount', 'money', '价格', '价值', '数额', '发生额'],
+                '凭证号': ['凭证号', 'voucher', '单据号', '编号', '凭证编号', 'voucher no'],
+                '部门': ['部门', 'department', '单位', '机构'],
+                '人员': ['人员', 'person', '员工', '姓名', '经办人', '制单人'],
+                '方向': ['方向', '方向', '借贷方向', 'debit/credit', 'dc', '借贷']
+            };
+
+            standardFields.forEach(stdField => {
+                const keywords = keywordMap[stdField.name] || [];
+                let bestMatch = null;
+                let bestScore = 0;
+
+                userFields.forEach(userField => {
+                    const userName = userField.name.toLowerCase();
+                    let score = 0;
+
+                    keywords.forEach(keyword => {
+                        if (userName.includes(keyword.toLowerCase())) {
+                            score += 10;
+                        }
+                    });
+
+                    if (stdField.type === userField.type) {
+                        score += 5;
+                    }
+                    if (userName === stdField.name.toLowerCase() || keywords.some(k => userName === k.toLowerCase())) {
+                        score += 20;
+                    }
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestMatch = userField.name;
+                    }
+                });
+
+                if (bestScore > 5 && bestMatch) {
+                    mapping[stdField.id] = bestMatch;
+                    if (bestScore >= 25) {
+                        confidence[stdField.id] = 'high';
+                    } else if (bestScore >= 10) {
+                        confidence[stdField.id] = 'medium';
+                    } else {
+                        confidence[stdField.id] = 'low';
+                    }
+                }
+            });
+
+            return { mapping, confidence };
+        }
+
+        // ===== 智能推荐映射（科目余额表） =====
+        function recommendBalanceMapping() {
+            const mapping = {};
+            const confidence = {};
+            const keywordMap = {
+                '公司名': ['公司', '公司名', '公司名称', '企业', '单位', 'company', 'entity'],
+                '科目编号': ['科目编号', '科目代码', 'account code', 'account_code', '科目编码', '编码', 'code', '编号'],
+                '科目名称': ['科目名称', '科目', 'subject', '账户', '会计科目', 'account'],
+                '期初借方': ['期初借方', '期初借', 'beginning debit', 'initial debit'],
+                '期初贷方': ['期初贷方', '期初贷', 'beginning credit', 'initial credit'],
+                '期初余额': ['期初余额', '期初', 'beginning', '期初金额', 'initial balance'],
+                '期末借方': ['期末借方', '期末借', 'ending debit', 'final debit'],
+                '期末贷方': ['期末贷方', '期末贷', 'ending credit', 'final credit'],
+                '期末余额': ['期末余额', '期末', 'ending', '期末金额', 'final balance'],
+                '期初余额方向': ['期初方向', '期初余额方向', '期初借贷方向', 'beginning direction'],
+                '期末余额方向': ['期末方向', '期末余额方向', '期末借贷方向', 'ending direction']
+            };
+
+            getBalanceFields().forEach(stdField => {
+                const keywords = keywordMap[stdField.name] || [];
+                let bestMatch = null;
+                let bestScore = 0;
+
+                balanceUserFields.forEach(userField => {
+                    const userName = userField.name.toLowerCase();
+                    let score = 0;
+
+                    keywords.forEach(keyword => {
+                        if (userName.includes(keyword.toLowerCase())) {
+                            score += 10;
+                        }
+                    });
+
+                    if (stdField.type === userField.type) {
+                        score += 5;
+                    }
+                    if (userName === stdField.name.toLowerCase() || keywords.some(k => userName === k.toLowerCase())) {
+                        score += 20;
+                    }
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestMatch = userField.name;
+                    }
+                });
+
+                if (bestScore > 5 && bestMatch) {
+                    mapping[stdField.id] = bestMatch;
+                    if (bestScore >= 25) {
+                        confidence[stdField.id] = 'high';
+                    } else if (bestScore >= 10) {
+                        confidence[stdField.id] = 'medium';
+                    } else {
+                        confidence[stdField.id] = 'low';
+                    }
+                }
+            });
+
+            return { mapping, confidence };
+        }
+
+        // ===== 渲染映射表格 =====
+        function renderMappingTable(tableBodyId, fields, stdFields, recMapping, recUserFields, confidence) {
+            const tbody = document.getElementById(tableBodyId);
+            if (!tbody) return;
+            tbody.innerHTML = '';
+
+            stdFields.forEach(stdField => {
+                const row = document.createElement('tr');
+
+                const sampleField = recUserFields.find(f => f.name === recMapping[stdField.id]);
+                const sampleValue = (sampleField && sampleField.sample != null) ? sampleField.sample : '';
+
+                const confLevel = confidence ? confidence[stdField.id] : null;
+                let confIcon = '';
+                if (confLevel === 'high') {
+                    confIcon = '<span class="conf-icon conf-high" title="高置信度匹配"><i class="fas fa-check-circle"></i></span>';
+                } else if (confLevel === 'medium') {
+                    confIcon = '<span class="conf-icon conf-medium" title="部分匹配，请确认"><i class="fas fa-exclamation-triangle"></i></span>';
+                } else if (confLevel === 'low') {
+                    confIcon = '<span class="conf-icon conf-low" title="弱匹配，建议手动确认"><i class="fas fa-times-circle"></i></span>';
+                }
+                if (confLevel) {
+                    row.setAttribute('data-confidence', confLevel);
+                }
+
+                let selectHtml = `<select class="field-select" data-std-field="${stdField.id}" data-section="${tableBodyId}">`;
+                selectHtml += `<option value="">-- 不映射 --</option>`;
+
+                fields.forEach(userField => {
+                    const selected = recMapping[stdField.id] === userField.name ? 'selected' : '';
+                    selectHtml += `<option value="${userField.name}" ${selected}>${userField.name} (${userField.type})</option>`;
+                });
+
+                selectHtml += '</select>';
+
+                // 公司名字段：如果下拉没选源字段，显示手动输入框
+                let companyManualHtml = '';
+                if (stdField.name === '公司名') {
+                    const isMapped = recMapping[stdField.id] && recMapping[stdField.id].length > 0;
+                    companyManualHtml = `
+                        <div class="company-manual-wrapper" style="margin-top:${isMapped ? '0' : '6'}px;">
+                            <input type="text" class="company-manual" style="display:${isMapped ? 'none' : 'inline-block'};"
+                                   placeholder="原文件无公司名时，在此手动输入..." value="">
+                        </div>
+                    `;
+                }
+
+                const displayValue = (typeof sampleValue === 'number' || sampleValue) ? sampleValue : '-';
+
+                row.innerHTML = `
+                    <td>
+                        <strong>${stdField.name}</strong> ${confIcon}
+                        ${stdField.required ? '<span class="required-badge">必填</span>' : '<span class="optional-badge">可选</span>'}
+                        ${['方向', '期初余额方向', '期末余额方向'].includes(stdField.name) ? '<span class="integrity-badge"><i class="fas fa-exclamation-triangle"></i> 影响完整性测试</span>' : ''}
+                    </td>
+                    <td>${stdField.description}</td>
+                    <td>${selectHtml}${companyManualHtml}</td>
+                    <td><span class="type-badge type-${stdField.type}">${stdField.type}</span></td>
+                    <td class="sample-cell">${displayValue}</td>
+                `;
+
+                tbody.appendChild(row);
+            });
+
+            document.querySelectorAll(`#${tableBodyId} .field-select`).forEach(select => {
+                select.addEventListener('change', updateSampleValue);
+                // 公司名字段：联动手动输入框显隐
+                const stdId = select.dataset.stdField;
+                if (stdId === 'company') {
+                    select.addEventListener('change', function() {
+                        const wrapper = this.closest('td').querySelector('.company-manual-wrapper');
+                        const input = wrapper ? wrapper.querySelector('.company-manual') : null;
+                        if (wrapper && input) {
+                            if (this.value) {
+                                input.style.display = 'none';
+                                wrapper.style.marginTop = '0';
+                            } else {
+                                input.style.display = 'inline-block';
+                                wrapper.style.marginTop = '6px';
+                            }
+                        }
+                    });
+                }
+            });
+        }
+
+        function updateSampleValue(event) {
+            const select = event.target;
+            const tableBodyId = select.dataset.section;
+            const stdFieldId = select.dataset.stdField;
+            const selectedField = select.value;
+            const row = select.closest('tr');
+            const sampleCell = row.querySelector('.sample-cell');
+
+            if (selectedField) {
+                let userFields = (tableBodyId === 'balance-mapping-body') ? balanceUserFields : userFields;
+                const userField = userFields.find(f => f.name === selectedField);
+                const val = (userField && userField.sample != null) ? userField.sample : '';
+                sampleCell.textContent = (typeof val === 'number' || val) ? val : '-';
+            } else {
+                sampleCell.textContent = '-';
+            }
+        }
+
+        // 收集映射
+        function collectMapping(tableBodyId, stdFields) {
+            const mapping = {};
+            const errors = [];
+            const manualFills = {};
+
+            document.querySelectorAll(`#${tableBodyId} .field-select`).forEach(select => {
+                const stdFieldId = select.dataset.stdField;
+                const selectedField = select.value;
+                const stdField = stdFields.find(f => f.id === stdFieldId);
+
+                // 公司名特殊处理：如果无映射且有手动输入值
+                if (stdField && stdField.name === '公司名' && !selectedField) {
+                    const container = select.closest('td');
+                    const manualInput = container ? container.querySelector('.company-manual') : null;
+                    if (manualInput && manualInput.value.trim()) {
+                        manualFills['公司名'] = manualInput.value.trim();
+                        return;  // 不加入 mapping，单独处理
+                    }
+                }
+
+                if (selectedField) {
+                    mapping[stdField.name] = selectedField;
+                }
+
+                if (stdField && stdField.required && !selectedField) {
+                    errors.push(`${stdField.name} 是必填字段`);
+                    select.classList.add('error');
+                } else {
+                    select.classList.remove('error');
+                }
+            });
+
+            return { mapping, errors, manualFills };
+        }
+
+        // ===== 保存映射 =====
+        async function saveMapping() {
+            let allErrors = [];
+
+            // 收集序时账映射
+            const journalResult = collectMapping('journal-mapping-body', standardFields);
+            allErrors = allErrors.concat(journalResult.errors);
+
+            // 收集科目余额表映射（如果存在）
+            let balanceMapping = null;
+            let balanceManualFills = {};
+            if (hasBalance) {
+                const balanceResult = collectMapping('balance-mapping-body', getBalanceFields());
+                allErrors = allErrors.concat(balanceResult.errors);
+                if (Object.keys(balanceResult.mapping).length > 0) {
+                    balanceMapping = balanceResult.mapping;
+                }
+                balanceManualFills = balanceResult.manualFills;
+            }
+
+            if (allErrors.length > 0) {
+                alert('请填写以下必填字段：\n' + allErrors.join('\n'));
+                return;
+            }
+
+            document.getElementById('loading-overlay').style.display = 'flex';
+
+            try {
+                const payload = {
+                    field_mapping: journalResult.mapping,
+                    manual_fills: journalResult.manualFills || {},
+                };
+                if (balanceMapping) {
+                    payload.balance_field_mapping = balanceMapping;
+                    payload.balance_format = balanceFormat;
+                }
+                if (Object.keys(balanceManualFills).length > 0) {
+                    payload.balance_manual_fills = balanceManualFills;
+                }
+
+                const response = await fetch('/api/configure-fields', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    if (result.has_balance_data) {
+                        window.location.href = '/integrity-test';
+                    } else {
+                        window.location.href = '/query';
+                    }
+                } else {
+                    alert('保存失败: ' + (result.error || '未知错误'));
+                }
+            } catch (error) {
+                alert('保存失败: ' + error.message);
+            } finally {
+                document.getElementById('loading-overlay').style.display = 'none';
+            }
+        }
+
+        // ===== AI 智能映射 =====
+        async function aiAutoMap(target, btnId) {
+            const btn = document.getElementById(btnId);
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 映射中...';
+
+            try {
+                let payload = {};
+
+                if (target === 'journal' || target === 'both') {
+                    payload.journal_fields = userFields.map(f => ({
+                        name: f.name,
+                        type: f.type,
+                        sample: (previewData && previewData.length > 0) ? previewData[0][f.name] : null
+                    }));
+                    payload.journal_standard_fields = standardFields.map(f => ({
+                        id: f.id, name: f.name, description: f.description, type: f.type
+                    }));
+                }
+
+                if ((target === 'balance' || target === 'both') && hasBalance) {
+                    payload.balance_fields = balanceUserFields.map(f => ({
+                        name: f.name,
+                        type: f.type,
+                        sample: (balancePreviewData && balancePreviewData.length > 0) ? balancePreviewData[0][f.name] : null
+                    }));
+                    payload.balance_standard_fields = getBalanceFields().map(f => ({
+                        id: f.id, name: f.name, description: f.description, type: f.type
+                    }));
+                    payload.balance_format = balanceFormat;
+                }
+
+                const response = await fetch('/api/auto-map-fields', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    if (result.journal_mapping) {
+                        Object.entries(result.journal_mapping).forEach(([stdId, sourceName]) => {
+                            const select = document.querySelector(`#journal-mapping-body select[data-std-field="${stdId}"]`);
+                            if (select) {
+                                select.value = sourceName;
+                                const event = new Event('change', { bubbles: true });
+                                select.dispatchEvent(event);
+                            }
+                        });
+                    }
+                    if (result.balance_mapping && hasBalance) {
+                        Object.entries(result.balance_mapping).forEach(([stdId, sourceName]) => {
+                            const select = document.querySelector(`#balance-mapping-body select[data-std-field="${stdId}"]`);
+                            if (select) {
+                                select.value = sourceName;
+                                const event = new Event('change', { bubbles: true });
+                                select.dispatchEvent(event);
+                            }
+                        });
+                    }
+                    const label = target === 'journal' ? '序时账' : target === 'balance' ? '科目余额表' : '全部';
+                    alert(`AI 智能映射完成（${label}）！请检查映射结果，确认后点击"保存映射并继续"。`);
+                } else {
+                    alert('AI 映射失败: ' + (result.error || '未知错误'));
+                }
+            } catch (error) {
+                alert('AI 映射失败: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-robot"></i> AI 智能映射';
+            }
+        }
+
+        // ===== 初始化 =====
+        document.addEventListener('DOMContentLoaded', function() {
+            // 是否使用预填映射（来自历史记录）
+            const usePrefilledJournal = prefilledJournalMapping && Object.keys(prefilledJournalMapping).length > 0;
+
+            // 渲染序时账映射
+            const journalResult = usePrefilledJournal ? { mapping: prefilledJournalMapping, confidence: null } : recommendJournalMapping();
+            renderMappingTable('journal-mapping-body', userFields, standardFields, journalResult.mapping, userFields, journalResult.confidence);
+
+            // 预填映射时显示提示横幅
+            if (usePrefilledJournal) {
+                const banner = document.createElement('div');
+                banner.className = 'history-prefill-banner';
+                banner.innerHTML = '<i class="fas fa-history"></i> 已自动加载上次映射关系，请确认无误后点击"保存映射并继续"';
+                document.querySelector('.mapper-card').insertBefore(banner, document.querySelector('.mapper-card .data-preview'));
+            }
+
+            // 渲染科目余额表映射
+            if (hasBalance) {
+                const usePrefilledBalance = prefilledBalanceMapping && Object.keys(prefilledBalanceMapping).length > 0;
+                const balanceResult = usePrefilledBalance ? { mapping: prefilledBalanceMapping, confidence: null } : recommendBalanceMapping();
+                renderBalanceMapping(balanceResult.mapping, balanceResult.confidence);
+            }
+
+            // 重绘余额表映射的辅助函数（格式切换时复用）
+            function renderBalanceMapping(mapping, confidence) {
+                renderMappingTable('balance-mapping-body', balanceUserFields, getBalanceFields(), mapping, balanceUserFields, confidence);
+            }
+
+            // 智能重新映射
+            // 重置
+            document.getElementById('reset-btn')?.addEventListener('click', function() {
+                document.querySelectorAll('.field-select').forEach(select => {
+                    select.value = '';
+                    const row = select.closest('tr');
+                    const sampleCell = row.querySelector('.sample-cell');
+                    if (sampleCell) sampleCell.textContent = '-';
+                    select.classList.remove('error');
+                });
+            });
+
+            // 低置信度筛选
+            document.getElementById('low-confidence-filter')?.addEventListener('change', function() {
+                const showOnlyLow = this.checked;
+                ['journal-mapping-body', 'balance-mapping-body'].forEach(sectionId => {
+                    const tbody = document.getElementById(sectionId);
+                    if (!tbody) return;
+                    tbody.querySelectorAll('tr').forEach(row => {
+                        if (showOnlyLow) {
+                            const conf = row.getAttribute('data-confidence');
+                            row.style.display = (!conf || conf === 'low') ? '' : 'none';
+                        } else {
+                            row.style.display = '';
+                        }
+                    });
+                });
+            });
+
+            // 保存
+            document.getElementById('save-mapping-btn').addEventListener('click', saveMapping);
+
+            // onclick 属性已绑定 aiAutoMap，此处不重复绑定
+        });
+    </script>
+</body>
+</html>

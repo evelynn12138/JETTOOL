@@ -61,6 +61,23 @@ Session(app)
 app.secret_key = Config.SECRET_KEY
 
 
+@app.context_processor
+def inject_globals():
+    """注入全局模板变量"""
+    import subprocess
+    try:
+        commit = subprocess.check_output(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            stderr=subprocess.DEVNULL, cwd=os.path.dirname(__file__)
+        ).decode().strip()
+    except Exception:
+        commit = os.environ.get('COMMIT_HASH', 'unknown')
+    return {'app_version': 'v1.2.0', 'commit_hash': commit}
+
+
+
+
+
 def _json_safe(obj):
     """递归转换numpy类型为原生Python类型，确保JSON序列化安全"""
     if isinstance(obj, dict):

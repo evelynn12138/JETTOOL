@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API配置 - DA数据清洗业务AI应用</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="header-top">
+                <div class="header-left">
+                    <img src="/static/images/ey-logo.png" alt="EY" class="ey-logo">
+                    <a href="{{ url_for('upload_page') }}" class="back-link">
+                        <i class="fas fa-arrow-left"></i>
+                    </a>
+                    <i class="fas fa-key header-page-icon"></i>
+                    <h1>API配置</h1>
+                </div>
+            </div>
+            <div class="steps">
+                <div class="step completed">
+                    <span class="step-number">1</span>
+                    <span class="step-text">上传文件</span>
+                </div>
+                <div class="step active">
+                    <span class="step-number">2</span>
+                    <span class="step-text">API配置</span>
+                </div>
+                <div class="step">
+                    <span class="step-number">3</span>
+                    <span class="step-text">字段映射</span>
+                </div>
+                <div class="step">
+                    <span class="step-number">4</span>
+                    <span class="step-text">完整性测试</span>
+                </div>
+                <div class="step">
+                    <span class="step-number">5</span>
+                    <span class="step-text">查询分析</span>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <div class="config-card">
+                <div class="config-header">
+                    <h3><i class="fas fa-robot"></i> 配置AI服务商</h3>
+                    <p class="config-description">
+                        选择一个AI服务商并配置API Key，以启用自然语言查询生成SQL功能。
+                        唯一联网的是向AI服务商发送查询文本和字段信息。API Key仅存于会话，不持久化、不入库、不记日志。
+                    </p>
+                </div>
+
+                <div class="security-warning">
+                    <h4><i class="fas fa-shield-alt"></i> 安全提示</h4>
+                    <div class="warning-content">
+                        <p><strong>重要：</strong>您的API Key将仅存储在浏览器本地会话中，并直接用于向AI服务商发送请求。</p>
+                        <ul>
+                            <li>请勿在公用或共享电脑上使用此功能</li>
+                            <li>请妥善保管您的API Key，不要分享给他人</li>
+                            <li>关闭浏览器标签页后，API Key将自动清除</li>
+                            <li>建议定期在AI服务商平台检查API使用情况</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="api-config-form">
+                    <h4><i class="fas fa-cog"></i> 服务商配置</h4>
+
+                    <div class="form-group">
+                        <label for="provider-select">
+                            <i class="fas fa-cloud"></i> AI服务商
+                        </label>
+                        <select id="provider-select" class="api-input">
+                            <option value="">加载中...</option>
+                        </select>
+                        <p class="form-hint">
+                            选择AI服务商后，API Key和模型将自动填入默认值
+                        </p>
+                    </div>
+
+                    <div id="api-key-group">
+                        <div class="form-group">
+                            <label for="api-key">
+                                <i class="fas fa-key"></i> <span id="api-key-label">API Key</span>
+                            </label>
+                            <div class="input-with-button">
+                                <input type="password" id="api-key" placeholder="请输入API Key" class="api-input">
+                                <button class="btn btn-small" id="toggle-visibility">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </div>
+                            <p class="form-hint">
+                                可在 <a id="provider-doc-link" href="#" target="_blank">服务商官网</a> 获取API Key
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- 预配置服务商显示徽标 -->
+                    <div id="preconfigured-badge" class="preconfigured-badge" style="display: none;">
+                        <i class="fas fa-shield-alt"></i>
+                        <div>
+                            <strong>API Key 已预配置</strong>
+                            <p>该服务商的 API Key 已加密存储于系统配置中，使用前无需手动输入。</p>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="model-name">
+                            <i class="fas fa-tag"></i> 模型名称
+                        </label>
+                        <input type="text" id="model-name" placeholder="使用默认模型" class="api-input">
+                        <p class="form-hint">
+                            留空则使用服务商默认模型。DeepSeek: deepseek-chat, 百炼: qwen-plus, Kimi: moonshot-v1-8k
+                        </p>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="api-test">
+                            <i class="fas fa-vial"></i> 测试API连接
+                        </label>
+                        <div class="test-area">
+                            <textarea id="api-test" placeholder="输入测试查询语句，例如：统计每个科目的总金额" rows="3"></textarea>
+                            <button class="btn btn-small" id="test-api-btn">
+                                <i class="fas fa-play"></i> 测试生成代码
+                            </button>
+                        </div>
+                        <div class="test-result" id="test-result" style="display: none;">
+                            <h5><i class="fas fa-code"></i> 生成的代码</h5>
+                            <pre class="code-output" id="code-output"></pre>
+                            <div class="test-status" id="test-status"></div>
+                        </div>
+                    </div>
+
+                    <div class="api-info">
+                        <h4><i class="fas fa-info-circle"></i> 服务商说明</h4>
+                        <ul id="provider-info">
+                            <li>选择上方服务商查看说明</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- 复核模型配置（可选） -->
+                <div class="review-config-section">
+                    <div class="review-config-header" id="review-config-toggle">
+                        <h4><i class="fas fa-clipboard-check"></i> 复核模型配置 <span class="review-badge">可选</span></h4>
+                        <span class="review-toggle-icon" id="review-toggle-icon">
+                            <i class="fas fa-chevron-right"></i>
+                        </span>
+                    </div>
+                    <div class="review-config-body" id="review-config-body" style="display: none;">
+                        <p class="config-description" style="margin-bottom: 16px;">
+                            配置第二 AI 模型自动复核主模型生成的 SQL 代码，从语法、安全、意图、性能四个维度进行审查。
+                            留空则使用主模型进行复核。
+                        </p>
+
+                        <div class="form-group">
+                            <label for="review-provider-select">
+                                <i class="fas fa-cloud"></i> 复核 AI 服务商
+                            </label>
+                            <select id="review-provider-select" class="api-input">
+                                <option value="">使用主模型（不单独配置）</option>
+                            </select>
+                        </div>
+
+                        <div id="review-api-key-group" style="display: none;">
+                            <div class="form-group">
+                                <label for="review-api-key">
+                                    <i class="fas fa-key"></i> 复核模型 API Key
+                                </label>
+                                <div class="input-with-button">
+                                    <input type="password" id="review-api-key" placeholder="留空则使用主模型的 API Key" class="api-input">
+                                    <button class="btn btn-small" id="review-toggle-visibility">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="review-model-name">
+                                <i class="fas fa-tag"></i> 复核模型名称
+                            </label>
+                            <input type="text" id="review-model-name" placeholder="留空使用服务商默认模型" class="api-input">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="review-api-url">
+                                <i class="fas fa-link"></i> 复核 API 地址（可选）
+                            </label>
+                            <input type="text" id="review-api-url" placeholder="留空使用服务商默认地址" class="api-input">
+                            <p class="form-hint">
+                                自定义 API 端点，适用于代理或兼容 OpenAI 接口的自托管服务
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Dify 代理配置（可选） -->
+                <div class="review-config-section">
+                    <div class="review-config-header" id="dify-config-toggle">
+                        <h4><i class="fas fa-cloud"></i> Dify AI 代理配置 <span class="review-badge">推荐</span></h4>
+                        <span class="review-toggle-icon" id="dify-toggle-icon">
+                            <i class="fas fa-chevron-right"></i>
+                        </span>
+                    </div>
+                    <div class="review-config-body" id="dify-config-body" style="display: none;">
+                        <p class="config-description" style="margin-bottom: 16px;">
+                            配置 Dify Workflow 作为 AI 代理层，将覆盖除完整性测试助手外的所有 AI 调用（SQL 生成、字段映射、报表识别等）。
+                            Dify 端已配置模型 Qwen3-30B-A3B（temperature=0.7, max_tokens=4096）。
+                        </p>
+
+                        <div class="form-group">
+                            <label for="dify-base-url">
+                                <i class="fas fa-link"></i> Dify API 地址
+                            </label>
+                            <input type="text" id="dify-base-url"
+                                   placeholder="{{ '{{ config.DIFY_BASE_URL }}' }}"
+                                   class="api-input">
+                            <p class="form-hint">
+                                Dify 实例的 API 地址，例如 https://ai-platform-uat.ey.net/v1
+                            </p>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="dify-api-key">
+                                <i class="fas fa-key"></i> Dify Workflow API Key
+                            </label>
+                            <div class="input-with-button">
+                                <input type="password" id="dify-api-key" placeholder="app-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" class="api-input">
+                                <button class="btn btn-small" id="dify-toggle-visibility">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </div>
+                            <p class="form-hint">
+                                在 Dify 工作流的「API 访问」页面获取 API Key
+                            </p>
+                        </div>
+
+                        <div class="form-group">
+                            <label>
+                                <i class="fas fa-vial"></i> 测试 Dify 连接
+                            </label>
+                            <div class="test-area">
+                                <button class="btn btn-small" id="test-dify-btn">
+                                    <i class="fas fa-play"></i> 测试连接
+                                </button>
+                            </div>
+                            <div class="test-result" id="dify-test-result" style="display: none;">
+                                <div class="test-status" id="dify-test-status"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-buttons">
+                    <button class="btn btn-secondary" onclick="window.location.href='{{ url_for('upload_page') }}'">
+                        <i class="fas fa-arrow-left"></i> 返回上一步
+                    </button>
+                    <button class="btn btn-primary" id="save-api-btn">
+                        <i class="fas fa-check"></i> 保存并继续
+                    </button>
+                </div>
+            </div>
+
+            <div class="loading-overlay" id="loading-overlay" style="display: none;">
+                <div class="loading-content">
+                    <div class="spinner"></div>
+                    <h3>正在处理...</h3>
+                    <p>请稍候</p>
+                </div>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <p>© 2026 DA数据清洗业务AI应用 - 审计数据智能查询与分析工具 V1.0</p>
+            <p class="disclaimer">安全提示：API Key 仅存于当前会话，不持久化、不入库、不记日志。请确保在私人设备上使用。</p>
+        </footer>
+    </div>
+
+    <script>
+        // ====== 供应商信息 ======
+        const PROVIDER_INFO = {
+            deepseek: {
+                name: 'DeepSeek',
+                model: 'deepseek-chat',
+                doc_url: 'https://platform.deepseek.com/api-keys',
+                desc: 'DeepSeek 提供高性价比的AI能力，API价格极低，适合日常大量使用。新用户赠送500万Token。',
+                tip: '在DeepSeek平台注册并创建API Key，建议开启「计费」后使用。',
+                pre_configured: false,
+            },
+            bailian: {
+                name: '阿里云百炼',
+                model: 'qwen-plus',
+                doc_url: 'https://bailian.console.aliyun.com/',
+                desc: '阿里云百炼（通义千问）提供多种规格模型，qwen-plus适合日常使用，qwen-max效果更好但价格略高。',
+                tip: 'API Key 已预配置，无需手动输入。如需更换可在 config.py 中修改。',
+                pre_configured: true,
+            },
+            kimi: {
+                name: 'Kimi (月之暗面)',
+                model: 'moonshot-v1-8k',
+                doc_url: 'https://platform.moonshot.cn/console/api-keys',
+                desc: 'Kimi 大模型在长文本理解方面表现优秀，适合处理大量财务数据描述和复杂查询。',
+                tip: '在Moonshot开放平台注册，创建API Key。新用户有免费额度。',
+                pre_configured: false,
+            }
+        };
+
+        let providers = [];
+        let selectedProvider = null;
+        let preConfiguredIds = new Set();
+        let reviewProviders = [];
+        let reviewSelectedProvider = null;
+        let reviewPreConfiguredIds = new Set();
+
+        // ====== DOM 引用 ======
+        const providerSelect = document.getElementById('provider-select');
+        const apiKeyGroup = document.getElementById('api-key-group');
+        const apiKeyInput = document.getElementById('api-key');
+        const apiKeyLabel = document.getElementById('api-key-label');
+        const preconfiguredBadge = document.getElementById('preconfigured-badge');
+        const modelInput = document.getElementById('model-name');
+        const docLink = document.getElementById('provider-doc-link');
+        const providerInfo = document.getElementById('provider-info');
+        const toggleVisibilityBtn = document.getElementById('toggle-visibility');
+        const testApiBtn = document.getElementById('test-api-btn');
+        const apiTestInput = document.getElementById('api-test');
+        const testResult = document.getElementById('test-result');
+        const codeOutput = document.getElementById('code-output');
+        const testStatus = document.getElementById('test-status');
+        const saveApiBtn = document.getElementById('save-api-btn');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const reviewToggle = document.getElementById('review-config-toggle');
+        const reviewConfigBody = document.getElementById('review-config-body');
+        const reviewToggleIcon = document.getElementById('review-toggle-icon');
+        const reviewProviderSelect = document.getElementById('review-provider-select');
+        const reviewApiKeyGroup = document.getElementById('review-api-key-group');
+        const reviewApiKeyInput = document.getElementById('review-api-key');
+        const reviewModelInput = document.getElementById('review-model-name');
+        const reviewApiUrlInput = document.getElementById('review-api-url');
+        const reviewToggleVisBtn = document.getElementById('review-toggle-visibility');
+
+        let isVisible = false;
+
+        // ====== 加载供应商列表 ======
+        async function loadProviders() {
+            try {
+                const res = await fetch('/api/providers');
+                const data = await res.json();
+                if (data.success) {
+                    providers = data.providers;
+                    reviewProviders = data.providers;
+                    preConfiguredIds = new Set(
+                        providers.filter(p => p.pre_configured).map(p => p.id)
+                    );
+                    reviewPreConfiguredIds = new Set(
+                        reviewProviders.filter(p => p.pre_configured).map(p => p.id)
+                    );
+                    providerSelect.innerHTML = '<option value="">请选择AI服务商</option>';
+                    providers.forEach(p => {
+                        const opt = document.createElement('option');
+                        opt.value = p.id;
+                        opt.textContent = p.name + (p.pre_configured ? ' ✓ 已配置' : '') + ' (' + p.model + ')';
+                        providerSelect.appendChild(opt);
+                    });
+                    // 恢复上次选择的供应商
+                    const saved = localStorage.getItem('preferred_provider');
+                    if (saved && providers.some(p => p.id === saved)) {
+                        providerSelect.value = saved;
+                        onProviderChange();
+                    }
+
+                    // 填充复核模型供应商下拉
+                    reviewProviderSelect.innerHTML = '<option value="">使用主模型（不单独配置）</option>';
+                    reviewProviders.forEach(p => {
+                        const opt = document.createElement('option');
+                        opt.value = p.id;
+                        opt.textContent = p.name + ' (' + p.model + ')';
+                        reviewProviderSelect.appendChild(opt);
+                    });
+                }
+            } catch (e) {
+                providerSelect.innerHTML = '<option value="">加载失败，请刷新页面</option>';
+            }
+        }
+
+        // ====== 供应商切换 ======
+        function toggleApiKeyInput(show) {
+            apiKeyGroup.style.display = show ? 'block' : 'none';
+            preconfiguredBadge.style.display = show ? 'none' : 'flex';
+        }
+
+        function onProviderChange() {
+            const pid = providerSelect.value;
+            if (!pid || !PROVIDER_INFO[pid]) {
+                apiKeyLabel.textContent = 'API Key';
+                docLink.textContent = '服务商官网';
+                docLink.href = '#';
+                modelInput.value = '';
+                modelInput.placeholder = '请先选择服务商';
+                providerInfo.innerHTML = '<li>请选择上方一个AI服务商</li>';
+                selectedProvider = null;
+                toggleApiKeyInput(true);
+                return;
+            }
+
+            selectedProvider = pid;
+            const info = PROVIDER_INFO[pid];
+            const isPre = preConfiguredIds.has(pid);
+
+            apiKeyLabel.textContent = info.name + ' API Key';
+            docLink.textContent = info.name + ' 控制台';
+            docLink.href = info.doc_url;
+            modelInput.placeholder = info.model + '（留空使用默认）';
+
+            // 预配置服务商隐藏 API Key 输入
+            toggleApiKeyInput(!isPre);
+
+            providerInfo.innerHTML =
+                '<li><strong>' + info.name + '</strong> — ' + info.desc + '</li>' +
+                '<li><strong>使用提示：</strong> ' + info.tip + '</li>' +
+                '<li><strong>默认模型：</strong> ' + info.model + '，可在下方自定义模型名称</li>';
+
+            // 保存偏好
+            localStorage.setItem('preferred_provider', pid);
+        }
+
+        providerSelect.addEventListener('change', onProviderChange);
+
+        // ====== 复核模型供应商切换 ======
+        function onReviewProviderChange() {
+            const pid = reviewProviderSelect.value;
+            if (pid && reviewProviders.some(p => p.id === pid)) {
+                reviewApiKeyGroup.style.display = 'block';
+                const info = PROVIDER_INFO[pid];
+                if (info) reviewModelInput.placeholder = info.model + '（留空使用默认）';
+            } else {
+                reviewApiKeyGroup.style.display = 'none';
+                reviewApiKeyInput.value = '';
+                reviewModelInput.placeholder = '留空使用服务商默认模型';
+            }
+            reviewSelectedProvider = pid || null;
+        }
+        reviewProviderSelect.addEventListener('change', onReviewProviderChange);
+
+        // ====== 复核配置展开/收起 ======
+        let reviewConfigExpanded = false;
+        reviewToggle.addEventListener('click', () => {
+            reviewConfigExpanded = !reviewConfigExpanded;
+            reviewConfigBody.style.display = reviewConfigExpanded ? 'block' : 'none';
+            const icon = reviewToggleIcon.querySelector('i');
+            if (icon) icon.className = 'fas fa-chevron-' + (reviewConfigExpanded ? 'down' : 'right');
+        });
+
+        // ====== 切换复核API Key可见性 ======
+        let reviewIsVisible = false;
+        reviewToggleVisBtn.addEventListener('click', () => {
+            reviewIsVisible = !reviewIsVisible;
+            reviewApiKeyInput.type = reviewIsVisible ? 'text' : 'password';
+            reviewToggleVisBtn.innerHTML = reviewIsVisible
+                ? '<i class="fas fa-eye-slash"></i>'
+                : '<i class="fas fa-eye"></i>';
+        });
+
+        // ====== 切换API Key可见性 ======
+        toggleVisibilityBtn.addEventListener('click', () => {
+            isVisible = !isVisible;
+            apiKeyInput.type = isVisible ? 'text' : 'password';
+            toggleVisibilityBtn.innerHTML = isVisible
+                ? '<i class="fas fa-eye-slash"></i>'
+                : '<i class="fas fa-eye"></i>';
+        });
+
+        // ====== 测试API ======
+        function getSavePayload() {
+            const payload = {
+                provider: providerSelect.value,
+                model: modelInput.value.trim() || null,
+            };
+            // 非预配置服务商才需要传 api_key
+            if (!preConfiguredIds.has(providerSelect.value)) {
+                payload.api_key = apiKeyInput.value.trim();
+            }
+            // 复核模型配置
+            payload.review_provider = reviewProviderSelect.value || '';
+            payload.review_api_key = reviewApiKeyInput.value.trim() || '';
+            payload.review_model = reviewModelInput.value.trim() || '';
+            payload.review_api_url = reviewApiUrlInput.value.trim() || '';
+            return payload;
+        }
+
+        testApiBtn.addEventListener('click', async () => {
+            const provider = providerSelect.value;
+
+            if (!provider) {
+                alert('请选择AI服务商');
+                return;
+            }
+
+            const testQuery = apiTestInput.value.trim();
+            if (!testQuery) {
+                alert('请输入测试查询语句');
+                return;
+            }
+
+            // 非预配置服务商需要检查 API Key
+            if (!preConfiguredIds.has(provider) && !apiKeyInput.value.trim()) {
+                alert('请输入API Key');
+                return;
+            }
+
+            loadingOverlay.style.display = 'flex';
+
+            try {
+                const saveRes = await fetch('/api/configure-api', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(getSavePayload())
+                });
+                const saveResult = await saveRes.json();
+                if (!saveResult.success) {
+                    throw new Error('保存配置失败: ' + saveResult.error);
+                }
+
+                const testRes = await fetch('/api/generate-code', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: testQuery })
+                });
+                const testData = await testRes.json();
+
+                if (testData.success) {
+                    codeOutput.textContent = testData.code;
+                    testStatus.innerHTML = `
+                        <div class="status-success">
+                            <i class="fas fa-check-circle"></i> 测试成功！代码生成正常。
+                        </div>
+                    `;
+                } else {
+                    codeOutput.textContent = '';
+                    testStatus.innerHTML = `
+                        <div class="status-error">
+                            <i class="fas fa-times-circle"></i> 测试失败: ${testData.error}
+                        </div>
+                    `;
+                }
+                testResult.style.display = 'block';
+            } catch (error) {
+                codeOutput.textContent = '';
+                testStatus.innerHTML = `
+                    <div class="status-error">
+                        <i class="fas fa-times-circle"></i> 请求失败: ${error.message}
+                    </div>
+                `;
+                testResult.style.display = 'block';
+            } finally {
+                loadingOverlay.style.display = 'none';
+            }
+        });
+
+        // ====== Dify 配置展开/收起 ======
+        const difyToggle = document.getElementById('dify-config-toggle');
+        const difyConfigBody = document.getElementById('dify-config-body');
+        const difyToggleIcon = document.getElementById('dify-toggle-icon');
+        const difyBaseUrl = document.getElementById('dify-base-url');
+        const difyApiKey = document.getElementById('dify-api-key');
+        const difyTestResult = document.getElementById('dify-test-result');
+        const difyTestStatus = document.getElementById('dify-test-status');
+        const difyTestBtn = document.getElementById('test-dify-btn');
+        const difyToggleVisBtn = document.getElementById('dify-toggle-visibility');
+
+        let difyConfigExpanded = false;
+        difyToggle.addEventListener('click', () => {
+            difyConfigExpanded = !difyConfigExpanded;
+            difyConfigBody.style.display = difyConfigExpanded ? 'block' : 'none';
+            const icon = difyToggleIcon.querySelector('i');
+            if (icon) icon.className = 'fas fa-chevron-' + (difyConfigExpanded ? 'down' : 'right');
+        });
+
+        // 切换 Dify API Key 可见性
+        let difyIsVisible = false;
+        difyToggleVisBtn.addEventListener('click', () => {
+            difyIsVisible = !difyIsVisible;
+            difyApiKey.type = difyIsVisible ? 'text' : 'password';
+            difyToggleVisBtn.innerHTML = difyIsVisible
+                ? '<i class="fas fa-eye-slash"></i>'
+                : '<i class="fas fa-eye"></i>';
+        });
+
+        // 加载已保存的 Dify 配置
+        async function loadDifyConfig() {
+            try {
+                const res = await fetch('/api/dify-status');
+                const data = await res.json();
+                if (data.success && data.configured) {
+                    difyBaseUrl.value = data.base_url || '';
+                    difyConfigExpanded = true;
+                    difyConfigBody.style.display = 'block';
+                    difyToggleIcon.querySelector('i').className = 'fas fa-chevron-down';
+                }
+            } catch (e) {
+                // 静默失败
+            }
+        }
+
+        // 测试 Dify 连接
+        difyTestBtn.addEventListener('click', async () => {
+            const baseUrl = difyBaseUrl.value.trim();
+            const apiKey = difyApiKey.value.trim();
+
+            if (!baseUrl) {
+                difyTestStatus.innerHTML = '<div class="status-error"><i class="fas fa-times-circle"></i> 请输入 Dify API 地址</div>';
+                difyTestResult.style.display = 'block';
+                return;
+            }
+            if (!apiKey) {
+                difyTestStatus.innerHTML = '<div class="status-error"><i class="fas fa-times-circle"></i> 请输入 Dify API Key</div>';
+                difyTestResult.style.display = 'block';
+                return;
+            }
+
+            difyTestBtn.disabled = true;
+            difyTestBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 测试中...';
+
+            try {
+                const res = await fetch('/api/configure-dify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ base_url: baseUrl, api_key: apiKey })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    difyTestStatus.innerHTML = '<div class="status-success"><i class="fas fa-check-circle"></i> 连接成功！' +
+                        (data.warning ? '<br><small style="color:#9a3412">' + data.warning + '</small>' : '') +
+                        '</div>';
+                } else {
+                    difyTestStatus.innerHTML = '<div class="status-error"><i class="fas fa-times-circle"></i> ' + data.error + '</div>';
+                }
+            } catch (error) {
+                difyTestStatus.innerHTML = '<div class="status-error"><i class="fas fa-times-circle"></i> 请求失败: ' + error.message + '</div>';
+            } finally {
+                difyTestResult.style.display = 'block';
+                difyTestBtn.disabled = false;
+                difyTestBtn.innerHTML = '<i class="fas fa-play"></i> 测试连接';
+            }
+        });
+
+        // 修改保存按钮：保存传统 API 配置 + Dify 配置
+        saveApiBtn.addEventListener('click', async function(e) {
+            const provider = providerSelect.value;
+
+            if (!provider) {
+                alert('请选择AI服务商');
+                return;
+            }
+
+            if (!preConfiguredIds.has(provider) && !apiKeyInput.value.trim()) {
+                alert('请输入API Key');
+                return;
+            }
+
+            loadingOverlay.style.display = 'flex';
+
+            try {
+                // 1. 保存传统 API 配置
+                const apiRes = await fetch('/api/configure-api', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(getSavePayload())
+                });
+                const apiResult = await apiRes.json();
+                if (!apiResult.success) {
+                    throw new Error(apiResult.error);
+                }
+
+                // 2. 如果有 Dify 配置，也保存
+                const difyUrl = difyBaseUrl.value.trim();
+                const difyKey = difyApiKey.value.trim();
+                if (difyUrl && difyKey) {
+                    await fetch('/api/configure-dify', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ base_url: difyUrl, api_key: difyKey })
+                    });
+                }
+
+                window.location.href = '/field-mapper';
+            } catch (error) {
+                alert('保存失败: ' + error.message);
+            } finally {
+                loadingOverlay.style.display = 'none';
+            }
+        });
+
+        // ====== 初始化 ======
+        document.addEventListener('DOMContentLoaded', () => {
+            loadProviders();
+            loadDifyConfig();
+        });
+    </script>
+
+    <style>
+        .security-warning {
+            background: rgba(212, 192, 0, 0.08);
+            border: 1px solid var(--yellow-dark);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 24px;
+        }
+
+        .security-warning h4 {
+            color: var(--yellow-dark);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .warning-content {
+            color: #666;
+        }
+
+        .warning-content ul {
+            list-style: none;
+            padding-left: 20px;
+            margin-top: 12px;
+        }
+
+        .warning-content li {
+            padding: 4px 0;
+            position: relative;
+        }
+
+        .warning-content li:before {
+            content: "⚠️";
+            position: absolute;
+            left: -20px;
+        }
+
+        .api-config-form {
+            margin-bottom: 32px;
+        }
+
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        .form-group label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .input-with-button {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+
+        select.api-input {
+            appearance: auto;
+            cursor: pointer;
+        }
+
+        .api-input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+
+        .form-hint {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        .form-hint a {
+            color: var(--yellow);
+            text-decoration: none;
+        }
+
+        .form-hint a:hover {
+            text-decoration: underline;
+        }
+
+        .test-area {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .test-area textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            resize: vertical;
+            min-height: 80px;
+            font-family: monospace;
+            box-sizing: border-box;
+        }
+
+        .test-result {
+            margin-top: 20px;
+            padding: 20px;
+            background: var(--light-gray);
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .test-result h5 {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            color: #333;
+        }
+
+        .code-output {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 16px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            margin-bottom: 16px;
+        }
+
+        .test-status {
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .status-success {
+            background: rgba(255, 231, 0, 0.12);
+            color: var(--black);
+            border: 1px solid var(--yellow);
+            padding: 12px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-error {
+            background: rgba(212, 192, 0, 0.08);
+            color: #7a6b00;
+            border: 1px solid var(--yellow-dark);
+            padding: 12px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .api-info {
+            background: rgba(255, 231, 0, 0.08);
+            border: 1px solid var(--yellow);
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 32px;
+        }
+
+        .api-info h4 {
+            color: var(--yellow);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .api-info ul {
+            list-style: none;
+            padding-left: 0;
+            margin: 0;
+        }
+
+        .api-info li {
+            padding: 4px 0;
+            color: #4b5563;
+        }
+
+        .preconfigured-badge {
+            background: rgba(255, 231, 0, 0.12);
+            border: 1px solid var(--yellow);
+            border-radius: 8px;
+            padding: 16px 20px;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .preconfigured-badge i {
+            font-size: 24px;
+            color: var(--black);
+        }
+
+        .preconfigured-badge strong {
+            color: var(--black);
+            font-size: 15px;
+        }
+
+        .preconfigured-badge p {
+            color: var(--black);
+            font-size: 13px;
+            margin: 4px 0 0 0;
+        }
+
+        /* 复核模型配置 */
+        .review-config-section {
+            margin-bottom: 32px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .review-config-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            background: var(--light-gray);
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.15s;
+        }
+        .review-config-header:hover {
+            background: #f3f4f6;
+        }
+        .review-config-header h4 {
+            margin: 0;
+            font-size: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #333;
+        }
+        .review-badge {
+            font-size: 11px;
+            background: rgba(255, 231, 0, 0.15);
+            color: var(--black);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: normal;
+        }
+        .review-toggle-icon {
+            color: #9ca3af;
+            font-size: 14px;
+            transition: transform 0.2s;
+        }
+        .review-config-body {
+            padding: 20px;
+            border-top: 1px solid #e5e7eb;
+        }
+    </style>
+</body>
+</html>

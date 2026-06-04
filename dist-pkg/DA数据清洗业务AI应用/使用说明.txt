@@ -1,0 +1,32 @@
+DA数据清洗业务AI应用 - 使用说明
+========================================
+
+📋 系统要求
+  - macOS 或 Windows / Linux
+  - Python 3.9 或更高版本
+    (从 https://www.python.org/downloads/ 下载)
+
+🚀 启动方法 (macOS)
+  1. 双击 start.command
+  2. 首次启动会自动安装依赖（需要联网）
+  3. 浏览器自动打开 http://127.0.0.1:5003
+
+🚀 启动方法 (Windows)
+  1. 打开终端 (cmd)，进入此文件夹
+  2. 运行: pip install -r requirements.txt
+  3. 运行: python app.py
+  4. 浏览器访问 http://127.0.0.1:5003
+
+🛑 停止服务
+  - 关闭终端窗口，或按 Ctrl+C
+
+📝 使用流程
+  1. 上传财务数据文件 (.csv, .xlsx)
+  2. 配置字段映射
+  3. 输入 DeepSeek API Key
+  4. 使用自然语言查询数据
+
+❓ 常见问题
+  - 端口被占用: 修改 config.py 中的端口号
+  - Python 未安装: 按上面链接下载安装
+  - 依赖安装失败: 确保网络连接正常

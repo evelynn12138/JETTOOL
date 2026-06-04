@@ -1,0 +1,61 @@
+{
+  "name": "da-data-cleaner",
+  "version": "1.0.0",
+  "description": "DA数据清洗业务AI应用",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build-dev": "node build.js",
+    "dist": "node build.js && cd .. && npx electron-builder --config electron/package.json"
+  },
+  "devDependencies": {
+    "electron": "^35.7.5",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.ey.data-cleaner",
+    "productName": "DA数据清洗业务AI应用",
+    "directories": {
+      "output": "../dist-electron"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "icon.ico"
+    ],
+    "win": {
+      "icon": "icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico",
+      "installerHeaderIcon": "icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "DA数据清洗业务AI应用",
+      "displayName": "DA数据清洗业务AI应用",
+      "uninstallDisplayName": "DA数据清洗业务AI应用"
+    },
+    "extraResources": [
+      {
+        "from": "../app_dist/",
+        "to": "app/"
+      },
+      {
+        "from": "../runtime/",
+        "to": "python/"
+      }
+    ]
+  }
+}

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DA数据清洗业务AI应用 - 审计数据智能查询与分析工具</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="header-top">
+                <div class="header-left">
+                    <img src="/static/images/ey-logo.png" alt="EY" class="ey-logo">
+                    <i class="fas fa-chart-line header-page-icon"></i>
+                    <h1>DA数据清洗业务AI应用</h1>
+                </div>
+            </div>
+            <p class="subtitle" style="padding: 20px 24px 8px;">TRDA 审计数据智能查询与分析工具</p>
+            <p class="version" style="margin: 0 24px 20px;">版本: V1.0</p>
+        </header>
+
+        <main class="main-content">
+            <div class="welcome-card">
+                <div class="card-icon">
+                    <i class="fas fa-brain"></i>
+                </div>
+                <h2>欢迎使用DA数据清洗业务AI应用</h2>
+                <p class="description">
+                    本地部署的审计数据处理工具。上传序时账和科目余额表，一键完整性测试，自然语言智能查询，AI 自动生成 SQL 并在本地引擎中执行。数据不出本机，安全可控。
+                </p>
+                <p class="description">
+                    告别 NAS、Excel、Alteryx、Teams 之间的来回切换，让审计人员用中文就能查询财务数据。
+                </p>
+
+                <div class="features">
+                    <div class="feature">
+                        <i class="fas fa-file-upload"></i>
+                        <h3>双表导入 + 智能字段映射</h3>
+                        <p>同时上传序时账和科目余额表，系统自动识别字段、推荐映射</p>
+                    </div>
+                    <div class="feature">
+                        <i class="fas fa-check-double"></i>
+                        <h3>一键完整性测试</h3>
+                        <p>三项固化审计程序：凭证借贷平衡检查、科目发生额归零验证、两表交叉比对</p>
+                    </div>
+                    <div class="feature">
+                        <i class="fas fa-comment-dots"></i>
+                        <h3>自然语言查询</h3>
+                        <p>用中文说出需求，AI 实时生成 SQL 并执行</p>
+                    </div>
+                    <div class="feature" onclick="window.location.href='/integrity-test'" style="cursor:pointer">
+                        <i class="fas fa-file-invoice"></i>
+                        <h3>财务报表清洗</h3>
+                        <p>上传资产负债表/利润表，AI 自动识别格式，清洗导出标准 Excel</p>
+                    </div>
+                    <div class="feature">
+                        <i class="fas fa-code"></i>
+                        <h3>代码可编辑</h3>
+                        <p>有编程基础的同事可修改 AI 生成的代码，做更灵活的衍生计算</p>
+                    </div>
+                </div>
+
+                <div class="action-buttons">
+                    <a href="{{ url_for('upload_page') }}" class="btn btn-primary">
+                        <i class="fas fa-play-circle"></i> 开始使用
+                    </a>
+                    <button class="btn btn-secondary" id="show-examples">
+                        <i class="fas fa-lightbulb"></i> 查看示例
+                    </button>
+                </div>
+            </div>
+
+            <div class="examples-card" id="examples-card" style="display: none;">
+                <h3><i class="fas fa-lightbulb"></i> 使用示例</h3>
+                <div class="examples">
+                    <div class="example">
+                        <h4>TRDA 组 - 完整性测试</h4>
+                        <p>"跑一遍三项完整性测试：借贷平衡检查、发生额归零验证、两表交叉比对"</p>
+                    </div>
+                    <div class="example">
+                        <h4>审计员 - 科目筛选</h4>
+                        <p>"筛选管理费用2024年全年借方发生额大于50万的交易"</p>
+                    </div>
+                    <div class="example">
+                        <h4>审计员 - 按条件抽凭</h4>
+                        <p>"找出全年单笔金额超过10万元且摘要中包含'服务费'字样的付款凭证"</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <p>© 2026 DA数据清洗业务AI应用 - 审计数据智能查询与分析工具 V1.0</p>
+            <p class="disclaimer">重要提示：您的数据完全在本地处理，不会上传到任何服务器。唯一联网的是向 DeepSeek API 发送查询文本，API Key 仅存于会话，不持久化、不入库、不记日志。</p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+        document.getElementById('show-examples').addEventListener('click', function() {
+            const examplesCard = document.getElementById('examples-card');
+            if (examplesCard.style.display === 'none') {
+                examplesCard.style.display = 'block';
+                this.innerHTML = '<i class="fas fa-chevron-up"></i> 隐藏示例';
+            } else {
+                examplesCard.style.display = 'none';
+                this.innerHTML = '<i class="fas fa-lightbulb"></i> 查看示例';
+            }
+        });
+    </script>
+</body>
+</html>

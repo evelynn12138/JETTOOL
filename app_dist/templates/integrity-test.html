@@ -1,0 +1,1927 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>完整性测试 - DA数据清洗业务AI应用</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="header-top">
+                <div class="header-left">
+                    <img src="/static/images/ey-logo.png" alt="EY" class="ey-logo">
+                    <a href="{{ url_for('field_mapper_page') }}" class="back-link">
+                        <i class="fas fa-arrow-left"></i>
+                    </a>
+                    <i class="fas fa-check-double header-page-icon"></i>
+                    <h1>完整性测试</h1>
+                </div>
+            </div>
+            <div class="steps">
+                <div class="step completed">
+                    <span class="step-number">1</span>
+                    <span class="step-text">上传文件</span>
+                </div>
+                <div class="step completed">
+                    <span class="step-number">2</span>
+                    <span class="step-text">API配置</span>
+                </div>
+                <div class="step completed">
+                    <span class="step-number">3</span>
+                    <span class="step-text">字段映射</span>
+                </div>
+                <div class="step active">
+                    <span class="step-number">4</span>
+                    <span class="step-text">完整性测试</span>
+                </div>
+                <div class="step">
+                    <span class="step-number">5</span>
+                    <span class="step-text">查询分析</span>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <!-- 说明卡片 -->
+            <div class="config-card">
+                <div class="config-header">
+                    <h3><i class="fas fa-clipboard-check"></i> 财务数据完整性测试</h3>
+                    <p class="config-description">
+                        系统将对上传的序时账和科目余额表执行三项固化的完整性测试——凭证借贷平衡检查、科目发生额归零验证、两表交叉比对。一键全部跑完，差异明细可直接导出为底稿附件。
+                        本步骤为可选项，您可以选择跳过直接进入查询分析。
+                    </p>
+                </div>
+            </div>
+
+            <!-- 三项测试描述 -->
+            <div class="tests-overview">
+                <div class="test-card" data-test="journal">
+                    <div class="test-card-header">
+                        <i class="fas fa-book"></i>
+                        <h4>测试一：序时账完整性测试</h4>
+                    </div>
+                    <p>凭证借贷是否平衡——按凭证分组检查发生额，验证每张凭证的借贷方是否平衡</p>
+                </div>
+                <div class="test-card" data-test="balance">
+                    <div class="test-card-header">
+                        <i class="fas fa-balance-scale"></i>
+                        <h4>测试二：科目余额表完整性测试</h4>
+                    </div>
+                    <p>科目发生额是否归零——汇总期初余额、期末余额，计算发生额(期末-期初)汇总是否归零</p>
+                </div>
+                <div class="test-card" data-test="cross">
+                    <div class="test-card-header">
+                        <i class="fas fa-link"></i>
+                        <h4>测试三：序时账&科目余额表交叉验证</h4>
+                    </div>
+                    <p>两表数据能不能对上——按科目汇总，检查序时账与科目余额表的发生额是否一致</p>
+                </div>
+            </div>
+
+            <!-- 高级设置：反结转 + 末级科目 -->
+            <div class="config-card" style="margin-bottom: 24px;">
+                <div class="config-header">
+                    <h3><i class="fas fa-exchange-alt"></i> 高级设置</h3>
+                    <p class="config-description">
+                        根据您的数据特点选择合适的处理模式，系统将自动应用后再执行完整性测试。
+                    </p>
+                </div>
+
+                <div class="settings-section">
+                    <div class="reverse-cf-toggle">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="reverse-cf-checkbox">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <div class="toggle-label">
+                            <strong>启用反结转模式</strong>
+                            <p id="reverse-cf-hint">关闭时使用原始数据进行完整性测试（适用于 SAP 等无需反结转的系统）</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-section" style="border-top: 1px solid #e5e7eb; padding-top: 16px; margin-top: 16px;">
+                    <div class="reverse-cf-toggle">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="leaf-accounts-checkbox">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <div class="toggle-label">
+                            <strong>仅使用末级科目</strong>
+                            <p id="leaf-accounts-hint">
+                                开启后，系统将从科目余额表中筛选末级科目（剔除空行、含"计"行、非末级科目），
+                                再执行完整性测试和交叉验证
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 结果区域 -->
+            <div class="test-results" id="test-results" style="display: none;">
+                <!-- 结果通过JavaScript动态渲染 -->
+            </div>
+
+            <!-- 底部按钮 -->
+            <div class="action-buttons">
+                <button class="btn btn-secondary" id="skip-btn">
+                    <i class="fas fa-forward"></i> 跳过，直接进入查询
+                </button>
+                <button class="btn btn-primary" id="run-tests-btn">
+                    <i class="fas fa-play"></i> 运行完整性测试
+                </button>
+            </div>
+
+            <div class="loading-overlay" id="loading-overlay" style="display: none;">
+                <div class="loading-content">
+                    <div class="spinner"></div>
+                    <h3 id="loading-title">正在执行完整性测试...</h3>
+                    <p id="loading-message">请稍候，系统正在验证数据一致性</p>
+                </div>
+            </div>
+            <!-- ====== 财务报表清洗 ====== -->
+            <div class="config-card" style="margin-bottom: 24px;">
+                <div class="config-header">
+                    <h3><i class="fas fa-file-invoice"></i> 财务报表清洗</h3>
+                    <p class="config-description">
+                        上传资产负债表或利润表文件（.xlsx / .xls），AI 自动识别报表结构和列映射，清洗导出为标准 Excel。
+                    </p>
+                    <!-- 已导入报表提示条 -->
+                    <div id="report-import-summary" style="display:none;"></div>
+                </div>
+
+                <div id="global-loading" style="display:none;text-align:center;padding:20px;">
+                    <div class="loading-spinner" style="width:32px;height:32px;border-width:3px;display:inline-block;"></div>
+                    <p style="margin-top:8px;color:var(--secondary-color);font-size:14px;" id="global-loading-text">处理中...</p>
+                </div>
+
+                <!-- 卡片1: 上传 -->
+                <div id="card-upload">
+                    <div class="upload-area" id="report-upload-area">
+                        <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                        <h3>拖拽文件到此处或点击上传</h3>
+                        <p class="upload-hint">支持 .xlsx / .xls 格式的财务报表</p>
+                        <input type="file" id="report-file-input" accept=".xlsx,.xls" style="display:none;">
+                        <button class="btn btn-primary" id="report-browse-btn" style="margin-top:8px;">
+                            <i class="fas fa-folder-open"></i> 选择文件
+                        </button>
+                        <div id="report-file-info" style="display:none;" class="file-details">
+                            <i class="fas fa-file-excel"></i>
+                            <div>
+                                <h4 id="report-file-name"></h4>
+                                <p id="report-file-size"></p>
+                            </div>
+                            <button class="btn btn-small" id="report-remove-file" style="margin-left:auto;padding:4px 8px;background:#fef2f2;border:none;border-radius:4px;cursor:pointer;">
+                                <i class="fas fa-times" style="color:#dc2626;"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="report-config-area" style="display:none;">
+                        <div style="display:flex;align-items:center;gap:12px;margin-top:12px;flex-wrap:wrap;">
+                            <label style="font-size:14px;"><i class="fas fa-table"></i> 选择工作表 (Sheet):</label>
+                            <select id="report-sheet-select" style="padding:6px 12px;font-size:14px;border:1px solid #cbd5e1;border-radius:6px;background:white;min-width:200px;"></select>
+                        </div>
+                        <div style="margin-top:12px;text-align:right;">
+                            <button class="btn btn-primary" id="report-detect-btn">
+                                <i class="fas fa-magic"></i> AI 识别结构
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="error-box" id="upload-error" style="display:none;"></div>
+                </div>
+
+                <div style="border-top:2px dashed #e2e8f0;margin:24px 0 20px;"></div>
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+                    <span style="background:var(--black);color:var(--yellow);width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;">2</span>
+                    <span style="font-size:15px;font-weight:600;color:var(--black);">AI 检测结果</span>
+                    <span style="font-size:13px;color:var(--secondary-color);">— 确认结构无误后提取数据</span>
+                </div>
+                <!-- 卡片2: AI检测 -->
+                <div id="card-detection" style="display:none;">
+                    <div class="detection-grid" id="detection-grid"></div>
+
+                    <h4 style="margin:16px 0 8px;font-size:14px;">列映射:</h4>
+                    <div class="col-mapping" id="detection-cols"></div>
+
+                    <div class="detection-item" style="margin-top:12px;border-left-color:var(--secondary-color);">
+                        <div class="label">跳过关键词</div>
+                        <div class="value" id="detection-skip-keywords" style="font-size:13px;font-weight:normal;"></div>
+                    </div>
+
+                    <div class="error-box" id="detection-error" style="display:none;"></div>
+
+                    <div style="margin-top:16px;display:flex;gap:12px;">
+                        <button class="btn btn-primary" id="extract-btn"><i class="fas fa-check"></i> 确认并提取数据</button>
+                        <button class="btn btn-secondary" id="retry-detect-btn"><i class="fas fa-redo"></i> 重新检测</button>
+                    </div>
+                </div>
+
+                <div style="border-top:2px dashed #e2e8f0;margin:24px 0 20px;"></div>
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+                    <span style="background:var(--black);color:var(--yellow);width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;">3</span>
+                    <span style="font-size:15px;font-weight:600;color:var(--black);">清洗结果预览</span>
+                    <span style="font-size:13px;color:var(--secondary-color);">— 导出或进行科目余额表核对</span>
+                </div>
+                <!-- 卡片3: 结果预览 -->
+                <div id="card-results" style="display:none;">
+                    <div class="stats-row" id="results-stats"></div>
+
+                    <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:8px;max-height:480px;overflow-y:auto;">
+                        <table class="preview-table" id="results-table"></table>
+                    </div>
+
+                    <div class="error-box" id="extract-error" style="display:none;"></div>
+
+                    <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap;">
+                        <button class="btn btn-success" id="export-btn"><i class="fas fa-file-excel"></i> 导出 Excel</button>
+                        <button class="btn btn-primary" id="reconcile-btn"><i class="fas fa-balance-scale"></i> 核对科目余额表</button>
+                        <button class="btn btn-secondary" id="add-report-btn"><i class="fas fa-plus"></i> 添加另一张报表</button>
+                        <button class="btn btn-secondary" id="reset-btn"><i class="fas fa-undo"></i> 重新上传</button>
+                    </div>
+                </div>
+
+                <div style="border-top:2px dashed #e2e8f0;margin:24px 0 20px;"></div>
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+                    <span style="background:var(--black);color:var(--yellow);width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;">4</span>
+                    <span style="font-size:15px;font-weight:600;color:var(--black);">科目余额表核对</span>
+                    <span style="font-size:13px;color:var(--secondary-color);">— 编辑映射关系后点击刷新</span>
+                </div>
+                <!-- 卡片4: 核对科目余额表 -->
+                <div id="card-reconcile" style="display:none;">
+                    <datalist id="reconcile-item-datalist"></datalist>
+                    <div id="reconcile-loading" style="text-align:center;padding:30px;">
+                        <div class="loading-spinner" style="width:32px;height:32px;border-width:3px;display:inline-block;"></div>
+                        <p style="margin-top:8px;color:var(--secondary-color);">正在核对科目余额表...</p>
+                    </div>
+
+                    <div id="reconcile-container" style="display:none;">
+                        <!-- 工具栏 -->
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap;padding:12px 16px;background:#f8f9fa;border-radius:8px;border:1px solid #e2e8f0;">
+                            <i class="fas fa-building" style="color:var(--secondary-color);"></i>
+                            <span style="font-size:13px;color:var(--secondary-color);font-weight:500;">公司:</span>
+                            <select id="reconcile-company-filter" style="padding:5px 10px;font-size:13px;border:1px solid #d1d5db;border-radius:5px;background:white;min-width:150px;">
+                                <option value="">全部</option>
+                            </select>
+                            <span style="width:1px;height:24px;background:#d1d5db;margin:0 4px;"></span>
+                            <button class="btn btn-primary" id="reconcile-refresh-btn" style="padding:6px 14px;font-size:13px;">
+                                <i class="fas fa-sync"></i> 刷新核对
+                            </button>
+                            <span style="width:1px;height:24px;background:#d1d5db;margin:0 4px;"></span>
+                            <button class="btn" id="reconcile-ai-btn" style="padding:6px 14px;font-size:13px;background:var(--yellow);color:var(--black);border:none;border-radius:5px;cursor:pointer;">
+                                <i class="fas fa-robot"></i> AI 差异分析
+                            </button>
+                            <button class="btn btn-success" id="reconcile-export-btn" style="padding:6px 14px;font-size:13px;">
+                                <i class="fas fa-file-excel"></i> 导出结果
+                            </button>
+                            <span style="width:1px;height:24px;background:#d1d5db;margin:0 4px;"></span>
+                            <button class="btn btn-secondary" id="reconcile-back-btn" style="padding:6px 14px;font-size:13px;">
+                                <i class="fas fa-arrow-left"></i> 返回
+                            </button>
+                            <span style="margin-left:auto;font-size:12px;color:#9ca3af;">
+                                <i class="fas fa-edit"></i> 双击可编辑报表科目名称
+                            </span>
+                        </div>
+
+                        <!-- 双栏布局 -->
+                        <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;">
+                            <!-- 左栏: 科目余额表 -->
+                            <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+                                <div style="background:var(--black);color:var(--yellow);padding:10px 14px;font-weight:600;font-size:14px;display:flex;align-items:center;gap:10px;">
+                                    <span><i class="fas fa-list"></i> 科目余额表 <span id="reconcile-row-count" style="font-weight:normal;font-size:12px;color:rgba(255,231,0,0.7);"></span></span>
+                                    <span style="margin-left:auto;display:none;align-items:center;gap:6px;" id="batch-edit-bar">
+                                        <span id="batch-selected-count" style="font-size:12px;color:rgba(255,231,0,0.8);font-weight:normal;"></span>
+                                        <input type="text" id="batch-item-input" list="reconcile-item-datalist" placeholder="统一设为..." style="padding:3px 8px;font-size:12px;border:1px solid rgba(255,231,0,0.3);border-radius:4px;background:rgba(255,231,0,0.1);color:white;width:140px;">
+                                        <button id="batch-apply-btn" style="padding:3px 10px;font-size:12px;background:var(--yellow);color:var(--black);border:none;border-radius:4px;cursor:pointer;font-weight:600;">应用</button>
+                                        <button id="batch-cancel-btn" style="padding:3px 8px;font-size:12px;background:transparent;color:rgba(255,231,0,0.7);border:1px solid rgba(255,231,0,0.3);border-radius:4px;cursor:pointer;">取消</button>
+                                    </span>
+                                </div>
+                                <div style="max-height:520px;overflow-y:auto;">
+                                    <table class="preview-table" id="reconcile-balance-table">
+                                        <thead>
+                                            <tr>
+                                                <th style="width:32px;"><input type="checkbox" id="reconcile-select-all" style="cursor:pointer;"></th>
+                                                <th style="min-width:60px;">科目编号</th>
+                                                <th style="min-width:100px;">科目名称</th>
+                                                <th style="min-width:80px;">期末余额</th>
+                                                <th style="min-width:130px;">报表科目名称</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="reconcile-balance-body"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- 右栏: 核对结果 -->
+                            <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+                                <div style="background:var(--black);color:var(--yellow);padding:10px 14px;font-weight:600;font-size:14px;">
+                                    <i class="fas fa-balance-scale"></i> 核对结果 <span id="reconcile-stats-label" style="font-weight:normal;font-size:12px;color:rgba(255,231,0,0.7);"></span>
+                                </div>
+                                <div style="max-height:520px;overflow-y:auto;">
+                                    <table class="preview-table" id="reconcile-result-table">
+                                        <thead>
+                                            <tr>
+                                                <th>报表项目</th>
+                                                <th>报表期末</th>
+                                                <th>余额表汇总</th>
+                                                <th>差异</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="reconcile-result-body"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="error-box" id="reconcile-error" style="display:none;"></div>
+
+                        <!-- AI 差异分析 -->
+                        <div id="reconcile-ai-analysis" style="display:none;margin-top:16px;">
+                            <div class="ai-analysis-card" style="border-left:4px solid var(--yellow);">
+                                <div class="ai-analysis-header">
+                                    <i class="fas fa-robot"></i>
+                                    <h4>AI 差异分析</h4>
+                                    <button class="btn btn-small" id="reconcile-ai-close" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:18px;color:var(--secondary-color);">&times;</button>
+                                </div>
+                                <div class="ai-analysis-body" id="reconcile-ai-body" style="white-space:pre-wrap;line-height:1.7;"></div>
+                                <div id="reconcile-ai-loading" style="display:none;text-align:center;padding:20px;color:var(--secondary-color);">
+                                    <div class="loading-spinner" style="display:inline-block;"></div> AI 正在分析差异...
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+
+        </main>
+
+        <footer class="footer">
+            <p>© 2026 DA数据清洗业务AI应用 - 审计数据智能查询与分析工具 V1.0</p>
+            <p class="disclaimer">提示：三项固化审计程序——凭证借贷平衡检查、科目发生额归零验证、两表交叉比对。</p>
+        </footer>
+    </div>
+
+    <script>
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const loadingTitle = document.getElementById('loading-title');
+        const loadingMessage = document.getElementById('loading-message');
+        const cfCheckbox = document.getElementById('reverse-cf-checkbox');
+        const cfHint = document.getElementById('reverse-cf-hint');
+        const leafCheckbox = document.getElementById('leaf-accounts-checkbox');
+        const leafHint = document.getElementById('leaf-accounts-hint');
+
+        // 反结转切换提示
+        cfCheckbox.addEventListener('change', function() {
+            if (this.checked) {
+                cfHint.innerHTML = '开启后，系统将：① 优先按科目编号4103识别结转损益凭证；'
+                    + '② 若无4103，按摘要同时含"结转"和"损益"识别；'
+                    + '③ 将结转损益金额从科目余额表期末余额中扣减；④ 使用调整后的数据执行三项测试。';
+            } else {
+                cfHint.innerHTML = '关闭时使用原始数据进行完整性测试（适用于 SAP 等无需反结转的系统）';
+            }
+        });
+
+        // 末级科目切换提示
+        leafCheckbox.addEventListener('change', function() {
+            if (this.checked) {
+                leafHint.innerHTML = '开启后，系统将：① 剔除科目编号为空的行；② 剔除科目编号含"计"的行（如合计、小计）；'
+                    + '③ 按公司+科目编号降序排列，保留末级科目（最细粒度的明细科目）；④ 使用筛选后的数据执行测试。';
+            } else {
+                leafHint.innerHTML = '关闭时使用科目余额表全部数据进行完整性测试';
+            }
+        });
+
+        // 运行测试
+        async function runTests() {
+            showLoading();
+
+            try {
+                const response = await fetch('/api/integrity-test/run', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        reverse_carry_forward: cfCheckbox.checked,
+                        leaf_accounts: leafCheckbox.checked
+                    })
+                });
+
+                const result = await response.json();
+                hideLoading();
+
+                if (!result.success && result.error) {
+                    alert('测试执行失败: ' + result.error);
+                    return;
+                }
+
+                if (!result.results) {
+                    alert('测试结果异常：数据格式错误');
+                    console.error('完整性测试返回数据:', JSON.stringify(result));
+                    return;
+                }
+
+                displayResults(result);
+            } catch (error) {
+                hideLoading();
+                alert('测试执行失败: ' + error.message);
+            }
+        }
+
+        // 显示结果
+        function displayResults(data) {
+            const container = document.getElementById('test-results');
+            container.style.display = 'block';
+
+            let html = '<div class="results-summary">';
+
+            // 汇总标题
+            const allPassed = data.all_passed;
+            const summary = data.summary || {};
+            let statusIcon, statusText, statusClass;
+
+            if (allPassed) {
+                statusIcon = 'fa-check-circle';
+                statusText = '所有测试均通过 ✓';
+                statusClass = 'status-pass';
+            } else {
+                statusIcon = 'fa-exclamation-triangle';
+                statusText = '存在异常，请查看详情';
+                statusClass = 'status-warn';
+            }
+
+            html += `
+                <div class="result-header-bar ${statusClass}">
+                    <i class="fas ${statusIcon}"></i>
+                    <div>
+                        <h4>完整性测试结果</h4>
+                        <p>${statusText}</p>
+                    </div>
+                    <div class="result-counts">
+                        <span class="count-badge count-completed">完成 ${summary.completed || 0}</span>
+                        <span class="count-badge count-skipped">跳过 ${summary.skipped || 0}</span>
+                        <span class="count-badge count-error">错误 ${summary.errors || 0}</span>
+                    </div>
+                </div>
+            `;
+
+            // 反结转信息
+            if (data.reverse_carry_forward_applied && data.carry_forward_info) {
+                const cf = data.carry_forward_info;
+                html += buildReverseCfInfo(cf);
+            }
+
+            // 末级科目信息
+            if (data.leaf_accounts_applied && data.leaf_accounts_info) {
+                const la = data.leaf_accounts_info;
+                html += `
+                    <div class="cf-info-card" style="border-color: rgba(139, 92, 246, 0.25); background: rgba(139, 92, 246, 0.05);">
+                        <div class="cf-info-header">
+                            <i class="fas fa-sitemap" style="color:#8b5cf6;"></i>
+                            <h4 style="color:#8b5cf6;">末级科目已应用</h4>
+                            <span class="test-badge badge-pass" style="background:rgba(139,92,246,0.1);color:#6d28d9;">已启用</span>
+                        </div>
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <span class="detail-label">原始科目数</span>
+                                <span class="detail-value">${la.original_count || 0}</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">末级科目数</span>
+                                <span class="detail-value">${la.leaf_count || 0}</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">剔除行数</span>
+                                <span class="detail-value value-warn">${(la.original_count || 0) - (la.leaf_count || 0)}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                if (la.error) {
+                    html += `<div class="balance-check check-fail"><i class="fas fa-exclamation-circle"></i> 末级科目筛选异常：${la.error}，已回退使用原始数据</div>`;
+                }
+            }
+
+            // 逐个测试结果
+            const tests = [
+                { key: 'journal_test', title: '测试一：序时账完整性测试', icon: 'fa-book' },
+                { key: 'balance_test', title: '测试二：科目余额表完整性测试', icon: 'fa-balance-scale' },
+                { key: 'cross_test', title: '测试三：序时账&科目余额表交叉验证', icon: 'fa-link' }
+            ];
+
+            tests.forEach(test => {
+                const resultData = data.results[test.key];
+                if (!resultData) return;
+
+                let statusBadge, detailsHtml = '';
+
+                if (resultData.status === 'skipped') {
+                    statusBadge = '<span class="test-badge badge-skipped">已跳过</span>';
+                    detailsHtml = `<p class="test-message">${resultData.message || '跳过'}</p>`;
+                } else if (resultData.status === 'error') {
+                    statusBadge = '<span class="test-badge badge-error">错误</span>';
+                    detailsHtml = `<p class="test-message test-error-message">${resultData.message || '执行失败'}</p>`;
+                } else if (resultData.status === 'completed') {
+                    statusBadge = resultData.passed
+                        ? '<span class="test-badge badge-pass">通过</span>'
+                        : '<span class="test-badge badge-fail">异常</span>';
+                    detailsHtml = buildTestDetails(test.key, resultData);
+                }
+
+                html += `
+                    <div class="test-result-card">
+                        <div class="test-result-header">
+                            <i class="fas ${test.icon}"></i>
+                            <h4>${test.title}</h4>
+                            ${statusBadge}
+                        </div>
+                        <div class="test-result-body">
+                            <p class="test-message">${resultData.message || ''}</p>
+                            ${detailsHtml}
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+
+            // 底部操作按钮
+            html += `
+                <div class="action-buttons" style="margin-top: 24px; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <button class="btn btn-secondary" onclick="exportResults()">
+                            <i class="fas fa-file-excel"></i> 导出Excel报告
+                        </button>
+                        ${!data.all_passed ? `<button class="btn btn-secondary" id="ai-analyze-btn" style="background: var(--yellow); color: var(--black); border: none;">
+                            <i class="fas fa-robot"></i> AI 差异分析
+                        </button>` : ''}
+                    </div>
+                    <button class="btn btn-primary" onclick="goToQuery()">
+                        <i class="fas fa-arrow-right"></i> 进入查询分析
+                    </button>
+                </div>
+                <div id="ai-analysis-container" style="display: none;"></div>
+            `;
+
+            container.innerHTML = html;
+
+            // AI 分析按钮事件
+            const aiBtn = document.getElementById('ai-analyze-btn');
+            if (aiBtn) aiBtn.addEventListener('click', aiAnalyzeIntegrity);
+
+            // 滚动到结果区域
+            container.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function buildTestDetails(testKey, data) {
+            const details = data.details || {};
+            let html = '<div class="test-details">';
+
+            if (testKey === 'journal_test') {
+                html += `
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <span class="detail-label">分组数量</span>
+                            <span class="detail-value">${details.total_groups || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">汇总金额</span>
+                            <span class="detail-value">¥${formatNum(details.total_amount)}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">正数分组</span>
+                            <span class="detail-value">${details.positive_groups || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">负数分组</span>
+                            <span class="detail-value">${details.negative_groups || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">零值分组</span>
+                            <span class="detail-value">${details.zero_groups || 0}</span>
+                        </div>
+                    </div>
+                `;
+                if (details.groups_preview && details.groups_preview.length > 0) {
+                    html += '<div class="detail-table-wrapper"><table class="detail-table"><thead><tr>';
+                    const headers = Object.keys(details.groups_preview[0]);
+                    headers.forEach(h => { html += `<th>${h}</th>`; });
+                    html += '</tr></thead><tbody>';
+                    details.groups_preview.forEach(row => {
+                        html += '<tr>';
+                        headers.forEach(h => {
+                            let val = row[h];
+                            if (typeof val === 'number') val = '¥' + val.toFixed(2);
+                            html += `<td>${val != null ? val : '-'}</td>`;
+                        });
+                        html += '</tr>';
+                    });
+                    html += '</tbody></table></div>';
+                    if (details.total_groups_exceed_preview) {
+                        html += '<p class="detail-hint">仅显示前20条记录</p>';
+                    }
+                }
+            } else if (testKey === 'balance_test') {
+                html += `
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <span class="detail-label">期初余额合计</span>
+                            <span class="detail-value">¥${formatNum(details.total_beginning)}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">期末余额合计</span>
+                            <span class="detail-value">¥${formatNum(details.total_ending)}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">发生额合计(期末-期初)</span>
+                            <span class="detail-value ${Math.abs(details.total_occurrence) > 0.01 ? 'value-warn' : ''}">¥${formatNum(details.total_occurrence)}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">数据行数</span>
+                            <span class="detail-value">${details.row_count || 0}</span>
+                        </div>
+                    </div>
+                    <div class="balance-check ${details.balance_check_passed ? 'check-pass' : 'check-fail'}">
+                        <i class="fas ${details.balance_check_passed ? 'fa-check-circle' : 'fa-times-circle'}"></i>
+                        <span>${details.balance_check_message || ''}</span>
+                    </div>
+                `;
+            } else if (testKey === 'cross_test') {
+                const consistent = details.is_consistent;
+                html += `
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <span class="detail-label">汇总科目数</span>
+                            <span class="detail-value">${details.total_accounts || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">一致数量</span>
+                            <span class="detail-value" style="color: var(--black);">${details.consistent_count || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">差异数量</span>
+                            <span class="detail-value" style="color: ${details.difference_count > 0 ? '#ef4444' : "var(--black)"};">${details.difference_count || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">仅有序时账</span>
+                            <span class="detail-value" style="color: ${details.only_in_journal > 0 ? '#f59e0b' : "var(--black)"};">${details.only_in_journal || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">仅有余额表</span>
+                            <span class="detail-value" style="color: ${details.only_in_balance > 0 ? '#f59e0b' : "var(--black)"};">${details.only_in_balance || 0}</span>
+                        </div>
+                    </div>
+                    <div class="balance-check ${consistent ? 'check-pass' : 'check-fail'}">
+                        <i class="fas ${consistent ? 'fa-check-circle' : 'fa-times-circle'}"></i>
+                        <span>${consistent ? '两表数据完全一致 ✓' : '两表数据存在差异，请查看下方详情'}</span>
+                    </div>
+                `;
+
+                // 显示差异记录
+                if (details.diff_records && details.diff_records.length > 0) {
+                    html += '<div class="detail-section"><h5><i class="fas fa-exclamation-triangle" style="color:#ef4444;"></i> 差异记录</h5>';
+                    html += '<table class="detail-table"><thead><tr>';
+                    const dHeaders = Object.keys(details.diff_records[0]);
+                    dHeaders.forEach(h => { html += `<th>${h}</th>`; });
+                    html += '</tr></thead><tbody>';
+                    details.diff_records.forEach(row => {
+                        html += '<tr>';
+                        dHeaders.forEach(h => {
+                            let val = row[h];
+                            if (typeof val === 'number') val = val.toFixed(2);
+                            html += `<td>${val != null ? val : '-'}</td>`;
+                        });
+                        html += '</tr>';
+                    });
+                    html += '</tbody></table>';
+                    if (details.has_more_diffs) {
+                        html += '<p class="detail-hint">仅显示前20条差异记录</p>';
+                    }
+                    html += '</div>';
+                }
+
+                // 仅有序时账的记录
+                if (details.only_journal_records && details.only_journal_records.length > 0) {
+                    html += '<div class="detail-section"><h5><i class="fas fa-info-circle" style="color:#f59e0b;"></i> 仅有序时账的记录</h5>';
+                    html += '<table class="detail-table"><thead><tr>';
+                    const jHeaders = Object.keys(details.only_journal_records[0]);
+                    jHeaders.forEach(h => { html += `<th>${h}</th>`; });
+                    html += '</tr></thead><tbody>';
+                    details.only_journal_records.forEach(row => {
+                        html += '<tr>';
+                        jHeaders.forEach(h => {
+                            let val = row[h];
+                            if (typeof val === 'number') val = val.toFixed(2);
+                            html += `<td>${val != null ? val : '-'}</td>`;
+                        });
+                        html += '</tr>';
+                    });
+                    html += '</tbody></table>';
+                    if (details.has_more_only_journal) {
+                        html += '<p class="detail-hint">仅显示前10条记录</p>';
+                    }
+                    html += '</div>';
+                }
+
+                // 仅有余额表的记录
+                if (details.only_balance_records && details.only_balance_records.length > 0) {
+                    html += '<div class="detail-section"><h5><i class="fas fa-info-circle" style="color:#f59e0b;"></i> 仅有余额表的记录</h5>';
+                    html += '<table class="detail-table"><thead><tr>';
+                    const bHeaders = Object.keys(details.only_balance_records[0]);
+                    bHeaders.forEach(h => { html += `<th>${h}</th>`; });
+                    html += '</tr></thead><tbody>';
+                    details.only_balance_records.forEach(row => {
+                        html += '<tr>';
+                        bHeaders.forEach(h => {
+                            let val = row[h];
+                            if (typeof val === 'number') val = val.toFixed(2);
+                            html += `<td>${val != null ? val : '-'}</td>`;
+                        });
+                        html += '</tr>';
+                    });
+                    html += '</tbody></table>';
+                    if (details.has_more_only_balance) {
+                        html += '<p class="detail-hint">仅显示前10条记录</p>';
+                    }
+                    html += '</div>';
+                }
+            }
+
+            html += '</div>';
+            return html;
+        }
+
+        // 反结转信息展示
+        function buildReverseCfInfo(cf) {
+            if (!cf) return '';
+            let html = `
+                <div class="cf-info-card">
+                    <div class="cf-info-header">
+                        <i class="fas fa-exchange-alt"></i>
+                        <h4>反结转已应用</h4>
+                        <span class="test-badge badge-pass">已启用</span>
+                    </div>
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <span class="detail-label">识别结转损益凭证</span>
+                            <span class="detail-value">${cf.cf_voucher_count || 0} 张</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">结转损益科目数</span>
+                            <span class="detail-value">${cf.cf_account_count || 0} 个</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">结转损益金额</span>
+                            <span class="detail-value value-warn" id="cf-total-amount">¥${formatNum(cf.cf_total_amount)}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">序时账剔除行数</span>
+                            <span class="detail-value">${cf.removed_journal_rows || 0} / ${cf.original_journal_rows || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">余额表</span>
+                            <span class="detail-value">${cf.balance_adjusted ? '已调整 ✓' : '未调整'}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            if (cf.error) {
+                html += `<div class="balance-check check-fail"><i class="fas fa-exclamation-circle"></i> 反结转执行异常：${cf.error}，已回退使用原始数据</div>`;
+            }
+            return html;
+        }
+
+        // 结转损益金额由 IntegrityChecker 在 carry_forward_info.cf_total_amount 中返回
+        async function aiAnalyzeIntegrity() {
+            const btn = document.getElementById('ai-analyze-btn');
+            const container = document.getElementById('ai-analysis-container');
+            if (!btn || !container) return;
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 分析中...';
+            container.style.display = 'block';
+            container.innerHTML = '<div class="ai-analysis-loading"><div class="spinner"></div><p>AI 正在分析异常原因，请稍候...</p></div>';
+
+            try {
+                const resp = await fetch('/api/integrity-test/ai-analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const result = await resp.json();
+
+                if (result.success && result.analysis) {
+                    container.innerHTML = renderAiAnalysis(result.analysis);
+                } else {
+                    container.innerHTML = `<div class="balance-check check-fail"><i class="fas fa-exclamation-circle"></i> ${result.error || '分析失败'}</div>`;
+                }
+            } catch (e) {
+                container.innerHTML = `<div class="balance-check check-fail"><i class="fas fa-exclamation-circle"></i> AI 分析请求失败: ${e.message}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-robot"></i> AI 差异分析';
+            }
+        }
+
+        function renderAiAnalysis(text) {
+            // 按测试分割（### 开头为分割点）
+            const sections = text.split(/(?=### )/).filter(s => s.trim());
+            if (sections.length === 0) {
+                return `<div class="ai-analysis-card"><div class="ai-analysis-body">${escapeHtml(text).replace(/\n/g, '<br>')}</div></div>`;
+            }
+
+            return sections.map(section => {
+                // 提取标题行
+                const lines = section.split('\n').filter(l => l.trim());
+                const titleLine = lines.find(l => l.startsWith('### ')) || '';
+                const title = titleLine.replace(/^###\s*/, '').trim();
+                const bodyLines = lines.filter(l => !l.startsWith('### '));
+
+                // 分隔可能原因和建议
+                let causesHtml = '';
+                let actionsHtml = '';
+                let currentSection = '';
+                let causeLines = [];
+                let actionLines = [];
+
+                bodyLines.forEach(line => {
+                    if (line.startsWith('**可能原因**') || line.startsWith('**异常情况**')) {
+                        currentSection = 'causes';
+                    } else if (line.startsWith('**建议后续操作**') || line.startsWith('**建议**')) {
+                        currentSection = 'actions';
+                        if (causeLines.length) {
+                            causesHtml = '<ul>' + causeLines.map(c => `<li>${c.replace(/^-\s*/, '').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</li>`).join('') + '</ul>';
+                            causeLines = [];
+                        }
+                    } else if (currentSection === 'causes') {
+                        causeLines.push(line);
+                    } else if (currentSection === 'actions') {
+                        actionLines.push(line);
+                    }
+                });
+                if (causeLines.length) {
+                    causesHtml = '<ul>' + causeLines.map(c => `<li>${c.replace(/^-\s*/, '').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</li>`).join('') + '</ul>';
+                }
+                if (actionLines.length) {
+                    actionsHtml = '<ul>' + actionLines.map(a => `<li>${a.replace(/^-\s*/, '').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</li>`).join('') + '</ul>';
+                }
+
+                return `
+                    <div class="ai-analysis-card">
+                        <div class="ai-analysis-header">
+                            <i class="fas fa-robot"></i>
+                            <h4>${escapeHtml(title)}</h4>
+                        </div>
+                        <div class="ai-analysis-body">
+                            ${causesHtml ? `<div class="ai-analysis-section"><h5><i class="fas fa-search"></i> 可能原因</h5>${causesHtml}</div>` : ''}
+                            ${actionsHtml ? `<div class="ai-analysis-section"><h5><i class="fas fa-tools"></i> 建议后续操作</h5>${actionsHtml}</div>` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const d = document.createElement('div');
+            d.textContent = text;
+            return d.innerHTML;
+        }
+
+        function formatNum(num) {
+            if (num == null) return '0.00';
+            return Number(num).toFixed(2).replace(/\d(?=(\d{3})+\.)/g, '$&,');
+        }
+
+        function showLoading() {
+            loadingOverlay.style.display = 'flex';
+        }
+
+        function hideLoading() {
+            loadingOverlay.style.display = 'none';
+        }
+
+        function goToQuery() {
+            window.location.href = '/query';
+        }
+
+        // 导出Excel报告
+        async function exportResults() {
+            try {
+                const response = await fetch('/api/integrity-test/export', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        reverse_carry_forward: cfCheckbox.checked,
+                        leaf_accounts: leafCheckbox.checked
+                    })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    alert('导出失败: ' + (err.error || response.statusText));
+                    return;
+                }
+
+                // 检查是否是JSON错误响应
+                const contentType = response.headers.get('content-type') || '';
+                if (contentType.includes('application/json')) {
+                    const err = await response.json();
+                    alert('导出失败: ' + (err.error || '未知错误'));
+                    return;
+                }
+
+                // 下载文件
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = '完整性测试结果.xlsx';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                alert('导出失败: ' + error.message);
+            }
+        }
+
+        // 事件监听
+        document.getElementById('run-tests-btn').addEventListener('click', runTests);
+        document.getElementById('skip-btn').addEventListener('click', goToQuery);
+
+        // 自动运行测试
+        document.addEventListener('DOMContentLoaded', () => {
+            // 页面加载后自动打招呼，引导用户进行完整性测试
+            setTimeout(() => sendChatMessage('你好，请开始引导'), 300);
+        });
+    </script>
+
+    <style>
+        .tests-overview {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .test-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            border-left: 4px solid var(--yellow);
+            transition: transform 0.2s;
+        }
+
+        .test-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .test-card[data-test="balance"] {
+            border-left-color: var(--black);
+        }
+
+        .test-card[data-test="cross"] {
+            border-left-color: #8b5cf6;
+        }
+
+        .test-card-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .test-card-header i {
+            font-size: 20px;
+            color: var(--yellow);
+        }
+
+        .test-card[data-test="balance"] .test-card-header i {
+            color: var(--black);
+        }
+
+        .test-card[data-test="cross"] .test-card-header i {
+            color: #8b5cf6;
+        }
+
+        .test-card-header h4 {
+            font-size: 15px;
+            color: #333;
+        }
+
+        .test-card p {
+            font-size: 13px;
+            color: #666;
+            line-height: 1.5;
+            padding-left: 30px;
+        }
+
+        .test-results {
+            margin-bottom: 24px;
+        }
+
+        .result-header-bar {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .result-header-bar.status-pass {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .result-header-bar.status-warn {
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+
+        .result-header-bar i {
+            font-size: 32px;
+        }
+
+        .result-header-bar.status-pass i {
+            color: var(--black);
+        }
+
+        .result-header-bar.status-warn i {
+            color: #f59e0b;
+        }
+
+        .result-header-bar h4 {
+            font-size: 18px;
+            color: #333;
+        }
+
+        .result-header-bar p {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .result-header-bar .result-counts {
+            margin-left: auto;
+            display: flex;
+            gap: 8px;
+        }
+
+        .count-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .count-completed {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--black);
+        }
+
+        .count-skipped {
+            background: rgba(107, 114, 128, 0.1);
+            color: var(--secondary-color);
+        }
+
+        .count-error {
+            background: rgba(239, 68, 68, 0.1);
+            color: #991b1b;
+        }
+
+        .test-result-card {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .test-result-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .test-result-header i {
+            font-size: 20px;
+            color: var(--secondary-color);
+        }
+
+        .test-result-header h4 {
+            flex: 1;
+            font-size: 16px;
+            color: #333;
+        }
+
+        .test-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .badge-pass {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--black);
+        }
+
+        .badge-fail {
+            background: rgba(239, 68, 68, 0.1);
+            color: #991b1b;
+        }
+
+        .badge-skipped {
+            background: rgba(107, 114, 128, 0.1);
+            color: var(--secondary-color);
+        }
+
+        .badge-error {
+            background: rgba(239, 68, 68, 0.1);
+            color: #991b1b;
+        }
+
+        .test-message {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 16px;
+        }
+
+        .test-error-message {
+            color: #ef4444;
+        }
+
+        .test-details {
+            margin-top: 12px;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .detail-item {
+            background: var(--light-gray);
+            padding: 12px 16px;
+            border-radius: 6px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .detail-label {
+            display: block;
+            font-size: 12px;
+            color: var(--secondary-color);
+            margin-bottom: 4px;
+        }
+
+        .detail-value {
+            display: block;
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--black);
+        }
+
+        .value-warn {
+            color: #ef4444 !important;
+        }
+
+        .balance-check {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+
+        .check-pass {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--black);
+        }
+
+        .check-fail {
+            background: rgba(239, 68, 68, 0.1);
+            color: #991b1b;
+        }
+
+        .detail-section {
+            margin-top: 20px;
+        }
+
+        .detail-section h5 {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            font-size: 14px;
+            color: #333;
+        }
+
+        .detail-table-wrapper {
+            overflow-x: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+        }
+
+        .detail-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .detail-table th {
+            background: var(--light-gray);
+            padding: 8px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #374151;
+            border-bottom: 1px solid #e5e7eb;
+            white-space: nowrap;
+        }
+
+        .detail-table td {
+            padding: 8px 12px;
+            border-bottom: 1px solid #e5e7eb;
+            color: var(--secondary-color);
+        }
+
+        .detail-hint {
+            font-size: 12px;
+            color: #9ca3af;
+            margin-top: 8px;
+            text-align: center;
+        }
+
+        /* 反结转切换开关 */
+        .reverse-cf-toggle {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 20px;
+            background: var(--light-gray);
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 48px;
+            height: 26px;
+            flex-shrink: 0;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: #ccc;
+            border-radius: 26px;
+            transition: 0.3s;
+        }
+
+        .toggle-slider:before {
+            content: "";
+            position: absolute;
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background: var(--yellow);
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(22px);
+        }
+
+        .toggle-label strong {
+            display: block;
+            font-size: 15px;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .toggle-label p {
+            font-size: 13px;
+            color: #666;
+            margin: 0;
+            line-height: 1.5;
+        }
+
+        /* 反结转信息卡片 */
+        .cf-info-card {
+            background: rgba(255, 231, 0, 0.08);
+            border: 1px solid var(--yellow);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .cf-info-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .cf-info-header i {
+            font-size: 20px;
+            color: var(--yellow);
+        }
+
+        .cf-info-header h4 {
+            flex: 1;
+            font-size: 16px;
+            color: var(--yellow);
+        }
+        /* AI 差异分析 */
+        .ai-analysis-loading {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--secondary-color);
+        }
+        .ai-analysis-loading .spinner {
+            margin: 0 auto 16px;
+        }
+        .ai-analysis-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            border-left: 4px solid var(--yellow);
+        }
+        .ai-analysis-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .ai-analysis-header i {
+            font-size: 20px;
+            color: var(--black);
+        }
+        .ai-analysis-header h4 {
+            font-size: 16px;
+            color: #333;
+            margin: 0;
+        }
+        .ai-analysis-body {
+            color: var(--secondary-color);
+            font-size: 14px;
+            line-height: 1.7;
+        }
+        .ai-analysis-section {
+            margin-bottom: 12px;
+        }
+        .ai-analysis-section:last-child {
+            margin-bottom: 0;
+        }
+        .ai-analysis-section h5 {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 14px;
+            color: #374151;
+            margin: 0 0 8px 0;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        .ai-analysis-section h5 i {
+            font-size: 14px;
+            color: var(--black);
+        }
+        .ai-analysis-section ul {
+            margin: 0;
+            padding-left: 18px;
+        }
+        .ai-analysis-section li {
+            margin-bottom: 6px;
+            line-height: 1.6;
+        }
+        .ai-analysis-section li:last-child {
+            margin-bottom: 0;
+        }
+
+        /* ====== 完整性测试对话面板 ====== */
+        .chat-toggle {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: var(--black);
+            color: var(--yellow);
+            border: none;
+            cursor: pointer;
+            font-size: 24px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+            z-index: 999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s;
+        }
+        .chat-toggle:hover {
+            transform: scale(1.1);
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+        }
+        .chat-toggle.open {
+            background: var(--yellow);
+            color: var(--black);
+        }
+        .chat-panel {
+            position: fixed;
+            bottom: 90px;
+            right: 24px;
+            width: 420px;
+            height: 560px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            z-index: 998;
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+        }
+        .chat-panel.open {
+            display: flex;
+        }
+        .chat-header {
+            background: var(--black);
+            color: white;
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+        .chat-header-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 15px;
+            font-weight: 600;
+        }
+        .chat-header-title i {
+            color: var(--yellow);
+        }
+        .chat-header-close {
+            background: none;
+            border: none;
+            color: rgba(255,255,255,0.6);
+            cursor: pointer;
+            font-size: 18px;
+            padding: 4px;
+        }
+        .chat-header-close:hover {
+            color: white;
+        }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            background: #f9fafb;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .chat-msg {
+            max-width: 85%;
+            padding: 10px 14px;
+            border-radius: 10px;
+            font-size: 14px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .chat-msg.user {
+            background: var(--black);
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+        }
+        .chat-msg.ai {
+            background: white;
+            color: var(--black);
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        }
+        .chat-msg.ai em {
+            font-style: normal;
+            color: var(--secondary-color);
+        }
+        .chat-msg .msg-label {
+            font-size: 11px;
+            font-weight: 600;
+            margin-bottom: 4px;
+            opacity: 0.6;
+        }
+        .chat-loading {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            align-self: flex-start;
+            color: var(--secondary-color);
+            font-size: 13px;
+        }
+        .chat-loading .spinner-small {
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border-color);
+            border-top: 2px solid var(--yellow);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        .chat-input-area {
+            display: flex;
+            gap: 8px;
+            padding: 12px 16px;
+            border-top: 1px solid var(--border-color);
+            background: white;
+            flex-shrink: 0;
+        }
+        .chat-input-area input {
+            flex: 1;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .chat-input-area input:focus {
+            border-color: var(--yellow);
+        }
+        .chat-input-area button {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            border: none;
+            background: var(--black);
+            color: var(--yellow);
+            cursor: pointer;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+        .chat-input-area button:hover {
+            background: var(--yellow);
+            color: var(--black);
+        }
+        .chat-input-area button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .chat-welcome {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--secondary-color);
+        }
+        .chat-welcome i {
+            font-size: 40px;
+            color: var(--yellow);
+            margin-bottom: 12px;
+        }
+        .chat-welcome h4 {
+            font-size: 16px;
+            margin-bottom: 8px;
+            color: var(--black);
+        }
+        .chat-welcome p {
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .chat-welcome .suggestions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+            margin-top: 16px;
+        }
+        .chat-welcome .suggestions button {
+            background: rgba(255, 231, 0, 0.15);
+            border: 1px solid var(--yellow);
+            border-radius: 20px;
+            padding: 6px 14px;
+            font-size: 12px;
+            cursor: pointer;
+            color: var(--black);
+            transition: all 0.2s;
+        }
+        .chat-welcome .suggestions button:hover {
+            background: var(--yellow);
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* ====== 财务报表清洗样式 ====== */
+        .upload-area {
+            border: 2px dashed #cbd5e1;
+            border-radius: 12px;
+            padding: 40px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: #fafbfc;
+            margin: 16px 0;
+        }
+        .upload-area:hover, .upload-area.dragover {
+            border-color: var(--yellow);
+            background: rgba(255, 231, 0, 0.05);
+        }
+        .upload-icon {
+            font-size: 48px;
+            color: #9ca3af;
+            margin-bottom: 12px;
+        }
+        .upload-area h3 {
+            font-size: 16px;
+            color: var(--black);
+            margin: 0 0 8px;
+        }
+        .upload-hint {
+            font-size: 13px;
+            color: var(--secondary-color);
+            margin: 4px 0;
+        }
+        .file-details {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            border-radius: 8px;
+            margin-top: 12px;
+        }
+        .file-details i { font-size: 24px; color: #16a34a; }
+        .file-details h4 { margin: 0; font-size: 14px; }
+        .file-details p { margin: 2px 0 0; font-size: 12px; color: var(--secondary-color); }
+        .detection-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin: 16px 0;
+        }
+        .detection-item {
+            padding: 12px 16px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 3px solid var(--yellow);
+        }
+        .detection-item .label { font-size: 12px; color: var(--secondary-color); }
+        .detection-item .value { font-size: 14px; font-weight: 600; margin-top: 2px; }
+        .col-mapping {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 12px 0;
+        }
+        .col-badge {
+            padding: 6px 12px;
+            background: var(--black);
+            color: var(--yellow);
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .col-badge .col-idx { color: rgba(255, 231, 0, 0.6); }
+        .col-badge .col-side { color: #9ca3af; }
+        .stats-row {
+            display: flex;
+            gap: 16px;
+            margin: 12px 0;
+            flex-wrap: wrap;
+        }
+        .stat-badge {
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            background: #f0fdf4;
+            color: #166534;
+        }
+        .stat-badge.warning { background: #fef3c7; color: #92400e; }
+        .stat-badge.danger { background: #fef2f2; color: #991b1b; }
+        .preview-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .preview-table th, .preview-table td {
+            border: 1px solid #e2e8f0;
+            padding: 6px 10px;
+            text-align: left;
+            white-space: nowrap;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .preview-table th {
+            background: var(--black);
+            color: var(--yellow);
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+        .preview-table tr:nth-child(even) { background: #f8f9fa; }
+        .reconcile-item-input:focus {
+            outline: 2px solid var(--yellow);
+            outline-offset: -1px;
+        }
+        .loading-spinner {
+            display: inline-block;
+            width: 24px;
+            height: 24px;
+            border: 2px solid #e5e7eb;
+            border-top-color: var(--black);
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+    </style>
+
+    <!-- ====== 完整性测试对话面板 ====== -->
+    <button class="chat-toggle" id="chatToggle" title="完整性测试助手">
+        <i class="fas fa-robot"></i>
+    </button>
+
+    <div class="chat-panel" id="chatPanel">
+        <div class="chat-header">
+            <div class="chat-header-title">
+                <i class="fas fa-clipboard-check"></i>
+                完整性测试助手
+            </div>
+            <button class="chat-header-close" id="chatClose"><i class="fas fa-times"></i></button>
+        </div>
+
+        <div class="chat-messages" id="chatMessages">
+            <div class="chat-welcome" id="chatWelcome">
+                <i class="fas fa-robot"></i>
+                <h4>你好，我是完整性测试助手</h4>
+                <p>我可以帮你运行完整性测试、分析结果、<br>处理反结转和末级科目等操作。</p>
+                <div class="suggestions">
+                    <button onclick="sendChatMessage('运行全部完整性测试')">运行全部测试</button>
+                    <button onclick="sendChatMessage('只跑借贷平衡')">只跑借贷平衡</button>
+                    <button onclick="sendChatMessage('分析测试结果')">分析测试结果</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="chat-input-area">
+            <input type="text" id="chatInput" placeholder="输入你的问题..." autocomplete="off">
+            <button id="chatSend"><i class="fas fa-paper-plane"></i></button>
+        </div>
+    </div>
+
+    <script>
+        // ====== 完整性测试对话 ======
+        const chatToggle = document.getElementById('chatToggle');
+        const chatPanel = document.getElementById('chatPanel');
+        const chatClose = document.getElementById('chatClose');
+        const chatMessages = document.getElementById('chatMessages');
+        const chatInput = document.getElementById('chatInput');
+        const chatSend = document.getElementById('chatSend');
+        const chatWelcome = document.getElementById('chatWelcome');
+
+        let isSending = false;
+
+        function openChat() {
+            chatPanel.classList.add('open');
+            chatToggle.classList.add('open');
+            chatToggle.innerHTML = '<i class="fas fa-times"></i>';
+        }
+
+        function closeChat() {
+            chatPanel.classList.remove('open');
+            chatToggle.classList.remove('open');
+            chatToggle.innerHTML = '<i class="fas fa-robot"></i>';
+        }
+
+        chatToggle.addEventListener('click', () => {
+            if (chatPanel.classList.contains('open')) {
+                closeChat();
+            } else {
+                openChat();
+            }
+        });
+
+        chatClose.addEventListener('click', closeChat);
+
+        function addChatMessage(text, role) {
+            chatWelcome.style.display = 'none';
+            const div = document.createElement('div');
+            div.className = 'chat-msg ' + role;
+            if (role === 'ai') {
+                div.innerHTML = '<div class="msg-label">完整性测试助手</div>' + escapeHtml(text);
+            } else {
+                div.innerHTML = escapeHtml(text);
+            }
+            chatMessages.appendChild(div);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return div;
+        }
+
+        function showChatLoading() {
+            chatWelcome.style.display = 'none';
+            const div = document.createElement('div');
+            div.className = 'chat-loading';
+            div.id = 'chatLoading';
+            div.innerHTML = '<div class="spinner-small"></div> 思考中...';
+            chatMessages.appendChild(div);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function hideChatLoading() {
+            const el = document.getElementById('chatLoading');
+            if (el) el.remove();
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        async function sendChatMessage(text) {
+            if (!text || isSending) return;
+
+            const msg = text.trim();
+            if (!msg) return;
+
+            addChatMessage(msg, 'user');
+            chatInput.value = '';
+            showChatLoading();
+            isSending = true;
+            chatSend.disabled = true;
+
+            try {
+                const resp = await fetch('/api/integrity-chat', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({message: msg})
+                });
+                const data = await resp.json();
+                hideChatLoading();
+                if (data.success) {
+                    const msgDiv = addChatMessage(data.response, 'ai');
+                    if (data.file_data) {
+                        const link = document.createElement('a');
+                        link.href = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,' + data.file_data;
+                        link.download = data.file_name || 'integrity_report.xlsx';
+                        link.className = 'btn btn-primary btn-small';
+                        link.style.cssText = 'margin-top:10px;text-decoration:none;color:var(--black);';
+                        link.innerHTML = '<i class="fas fa-download"></i> 下载报告';
+                        msgDiv.appendChild(link);
+                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                    }
+                } else {
+                    addChatMessage('❌ ' + (data.error || '请求失败'), 'ai');
+                }
+            } catch (e) {
+                hideChatLoading();
+                addChatMessage('❌ 网络错误，请重试', 'ai');
+            } finally {
+                isSending = false;
+                chatSend.disabled = false;
+            }
+        }
+
+        chatSend.addEventListener('click', () => sendChatMessage(chatInput.value));
+        chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') sendChatMessage(chatInput.value);
+        });
+    </script>
+    <script src="/static/js/report-cleaner.js"></script>
+</body>
+</html>

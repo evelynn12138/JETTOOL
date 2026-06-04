@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据上传 - DA数据清洗业务AI应用</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .history-match-banner {
+            margin: 20px 0;
+            border: 1px solid var(--yellow);
+            border-radius: 10px;
+            background: rgba(255, 231, 0, 0.08);
+            overflow: hidden;
+        }
+        .history-match-content {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 16px 20px;
+        }
+        .history-match-icon {
+            flex-shrink: 0;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(255, 231, 0, 0.18);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--yellow);
+            font-size: 18px;
+        }
+        .history-match-text {
+            flex: 1;
+        }
+        .history-match-text strong {
+            font-size: 15px;
+            color: var(--black);
+        }
+        .history-match-text p {
+            margin: 4px 0 0;
+            font-size: 13px;
+            color: #6b7280;
+        }
+        .history-match-actions {
+            flex-shrink: 0;
+            display: flex;
+            gap: 8px;
+        }
+        .history-match-actions .btn-small {
+            padding: 6px 14px;
+            font-size: 13px;
+        }
+
+        /* ============ 上传配置面板 ============ */
+        .upload-config {
+            margin-top: 16px;
+            padding: 16px;
+            background: var(--light-gray);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            text-align: left;
+        }
+        .config-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+        .config-row label {
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--black);
+            white-space: nowrap;
+        }
+        .config-select {
+            padding: 6px 12px;
+            font-size: 14px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            background: white;
+            min-width: 180px;
+        }
+        .config-input {
+            padding: 6px 12px;
+            font-size: 14px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            background: white;
+            width: 72px;
+            text-align: center;
+        }
+        .config-hint {
+            font-size: 12px;
+            color: var(--secondary-color);
+        }
+        .raw-preview {
+            margin-top: 12px;
+        }
+        .raw-preview h4 {
+            font-size: 14px;
+            color: var(--black);
+            margin: 0 0 8px;
+        }
+        .preview-table-wrapper {
+            overflow-x: auto;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            max-height: 360px;
+            overflow-y: auto;
+        }
+        .preview-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        .preview-table th, .preview-table td {
+            border: 1px solid #e2e8f0;
+            padding: 6px 10px;
+            text-align: left;
+            white-space: nowrap;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .preview-table th {
+            background: var(--light-gray);
+            font-weight: 600;
+            color: var(--black);
+        }
+        .preview-table tr.header-row td {
+            background: rgba(255, 231, 0, 0.15);
+            font-weight: 600;
+        }
+        .preview-hint {
+            font-size: 12px;
+            color: var(--secondary-color);
+            margin: 6px 0 0;
+        }
+        .preview-sheet-label {
+            font-weight: normal;
+            color: #6b7280;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="header-top">
+                <div class="header-left">
+                    <img src="/static/images/ey-logo.png" alt="EY" class="ey-logo">
+                    <a href="{{ url_for('index') }}" class="back-link">
+                        <i class="fas fa-arrow-left"></i>
+                    </a>
+                    <i class="fas fa-file-upload header-page-icon"></i>
+                    <h1>数据上传</h1>
+                </div>
+            </div>
+            <div class="steps">
+                <div class="step active">
+                    <span class="step-number">1</span>
+                    <span class="step-text">上传文件</span>
+                </div>
+                <div class="step">
+                    <span class="step-number">2</span>
+                    <span class="step-text">API配置</span>
+                </div>
+                <div class="step">
+                    <span class="step-number">3</span>
+                    <span class="step-text">字段映射</span>
+                </div>
+                <div class="step">
+                    <span class="step-number">4</span>
+                    <span class="step-text">完整性测试</span>
+                </div>
+                <div class="step">
+                    <span class="step-number">5</span>
+                    <span class="step-text">查询分析</span>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <!-- 序时账上传 -->
+            <div class="upload-card">
+                <div class="card-section-header">
+                    <i class="fas fa-book"></i>
+                    <h3>序时账上传 <span class="required-tag">必要</span></h3>
+                </div>
+                <p class="upload-section-desc">上传被审计单位的序时账/明细账文件，系统将自动解析字段并识别格式</p>
+
+                <div class="upload-area" id="journal-upload-area">
+                    <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                    <h3>拖拽文件到此处或点击上传</h3>
+                    <p class="upload-hint">支持 .xlsx / .csv 格式的序时账/明细账文件（不支持 .xls，请另存为 .xlsx 后上传）</p>
+                    <p class="upload-hint">最大文件大小: 2GB</p>
+
+                    <input type="file" id="journal-file-input" accept=".xlsx,.csv" style="display: none;">
+                    <button class="btn btn-primary" id="journal-browse-btn">
+                        <i class="fas fa-folder-open"></i> 选择文件
+                    </button>
+
+                    <div class="file-info" id="journal-file-info" style="display: none;">
+                        <div class="file-details">
+                            <i class="fas fa-file-excel"></i>
+                            <div>
+                                <h4 id="journal-file-name"></h4>
+                                <p id="journal-file-size"></p>
+                            </div>
+                            <button class="btn btn-small" id="journal-remove-file">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 文件解析配置区域（预览后显示） -->
+                    <div class="upload-config" id="journal-upload-config" style="display: none;">
+                        <div class="config-row" id="journal-sheet-row" style="display: none;">
+                            <label><i class="fas fa-table"></i> 选择工作表 (Sheet):</label>
+                            <select id="journal-sheet-select" class="config-select"></select>
+                        </div>
+
+                        <div class="config-row">
+                            <label><i class="fas fa-list-ol"></i> 表头所在行号:</label>
+                            <input type="number" id="journal-header-row" class="config-input" value="1" min="1" max="200">
+                            <span class="config-hint">数据实际上从第几行开始是表头？如第1行是标题、第3行才是列名，则填 3</span>
+                        </div>
+
+                        <div class="raw-preview">
+                            <h4><i class="fas fa-eye"></i> 文件原始内容预览 <span class="preview-sheet-label" id="journal-preview-sheet-label"></span></h4>
+                            <div class="preview-table-wrapper">
+                                <table class="preview-table" id="journal-preview-table"></table>
+                            </div>
+                            <p class="preview-hint">提示：确认表头行为绿色高亮行，如果不是请调整上方"表头所在行号"</p>
+                        </div>
+                    </div>
+
+                    <div class="upload-status" id="journal-upload-status" style="display: none;">
+                        <i class="fas fa-check-circle" style="color: var(--black);"></i>
+                        <span id="journal-upload-message"></span>
+                    </div>
+
+                    <button class="btn btn-primary" id="journal-upload-btn" disabled style="margin-top: 16px;">
+                        <i class="fas fa-upload"></i> 上传并解析
+                    </button>
+                </div>
+            </div>
+
+            <!-- 历史映射提示条 -->
+            <div class="history-match-banner" id="history-match-banner" style="display: none;">
+                <div class="history-match-content">
+                    <div class="history-match-icon">
+                        <i class="fas fa-history"></i>
+                    </div>
+                    <div class="history-match-text">
+                        <strong>检测到上次的映射记录</strong>
+                        <p id="history-match-desc">您上次上传的文件 <span id="history-filename"></span> 已有映射配置，是否直接应用？</p>
+                    </div>
+                    <div class="history-match-actions">
+                        <button class="btn btn-primary btn-small" id="history-apply-btn">
+                            <i class="fas fa-check"></i> 应用上次映射
+                        </button>
+                        <button class="btn btn-secondary btn-small" id="history-dismiss-btn">
+                            忽略
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 科目余额表上传 -->
+            <div class="upload-card" style="margin-top: 20px;">
+                <div class="card-section-header">
+                    <i class="fas fa-balance-scale"></i>
+                    <h3>科目余额表上传 <span class="optional-tag">可选</span></h3>
+                </div>
+                <p class="upload-section-desc">上传科目余额表文件（用于完整性交叉验证——两表数据一致性比对），支持 .xlsx / .csv 格式（不支持 .xls，请另存为 .xlsx 后上传）</p>
+
+                <div class="upload-area" id="balance-upload-area">
+                    <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                    <h3>拖拽文件到此处或点击上传</h3>
+                    <p class="upload-hint">支持 .xlsx / .csv 格式的科目余额表（不支持 .xls，请另存为 .xlsx 后上传）</p>
+                    <p class="upload-hint">最大文件大小: 2GB</p>
+
+                    <input type="file" id="balance-file-input" accept=".xlsx,.csv" style="display: none;">
+                    <button class="btn btn-primary" id="balance-browse-btn">
+                        <i class="fas fa-folder-open"></i> 选择文件
+                    </button>
+
+                    <div class="file-info" id="balance-file-info" style="display: none;">
+                        <div class="file-details">
+                            <i class="fas fa-file-excel"></i>
+                            <div>
+                                <h4 id="balance-file-name"></h4>
+                                <p id="balance-file-size"></p>
+                            </div>
+                            <button class="btn btn-small" id="balance-remove-file">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 文件解析配置区域（预览后显示） -->
+                    <div class="upload-config" id="balance-upload-config" style="display: none;">
+                        <div class="config-row" id="balance-sheet-row" style="display: none;">
+                            <label><i class="fas fa-table"></i> 选择工作表 (Sheet):</label>
+                            <select id="balance-sheet-select" class="config-select"></select>
+                        </div>
+
+                        <div class="config-row">
+                            <label><i class="fas fa-list-ol"></i> 表头所在行号:</label>
+                            <input type="number" id="balance-header-row" class="config-input" value="1" min="1" max="200">
+                            <span class="config-hint">数据实际上从第几行开始是表头？如第1行是标题、第3行才是列名，则填 3</span>
+                        </div>
+
+                        <div class="raw-preview">
+                            <h4><i class="fas fa-eye"></i> 文件原始内容预览 <span class="preview-sheet-label" id="balance-preview-sheet-label"></span></h4>
+                            <div class="preview-table-wrapper">
+                                <table class="preview-table" id="balance-preview-table"></table>
+                            </div>
+                            <p class="preview-hint">提示：确认表头行为绿色高亮行，如果不是请调整上方"表头所在行号"</p>
+                        </div>
+                    </div>
+
+                    <div class="upload-status" id="balance-upload-status" style="display: none;">
+                        <i class="fas fa-check-circle" style="color: var(--black);"></i>
+                        <span id="balance-upload-message"></span>
+                    </div>
+
+                    <button class="btn btn-primary" id="balance-upload-btn" disabled style="margin-top: 16px;">
+                        <i class="fas fa-upload"></i> 上传并解析
+                    </button>
+                </div>
+            </div>
+
+            <!-- 上传提示 -->
+            <div class="upload-tips">
+                <h4><i class="fas fa-info-circle"></i> 上传提示</h4>
+                <ul>
+                    <li>序时账为必要文件（用于完整性测试和查询分析），科目余额表为可选文件（用于交叉验证）</li>
+                    <li>不管被审计单位的数据格式长什么样，系统上传后将引导您完成字段映射，只需确认一次</li>
+                    <li>您的数据仅在本次会话中保存，关闭浏览器后自动清除</li>
+                </ul>
+            </div>
+
+            <div class="action-buttons">
+                <button class="btn btn-secondary" onclick="window.location.href='{{ url_for('index') }}'">
+                    <i class="fas fa-home"></i> 返回首页
+                </button>
+                <button class="btn btn-primary" id="continue-btn" disabled>
+                    <i class="fas fa-arrow-right"></i> 继续
+                </button>
+            </div>
+
+            <div class="loading-overlay" id="loading-overlay" style="display: none;">
+                <div class="loading-content">
+                    <div class="spinner"></div>
+                    <h3 id="loading-title">正在解析文件...</h3>
+                    <p id="loading-message">请稍候，系统正在智能解析您的财务数据</p>
+                </div>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <p>© 2026 DA数据清洗业务AI应用 - 审计数据智能查询与分析工具 V1.0</p>
+            <p class="disclaimer">隐私保护：您的数据完全在本地处理，不会上传到任何服务器。</p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+        // ============ 序时账上传 ============
+        const journalFileInput = document.getElementById('journal-file-input');
+        const journalBrowseBtn = document.getElementById('journal-browse-btn');
+        const journalUploadArea = document.getElementById('journal-upload-area');
+        const journalUploadBtn = document.getElementById('journal-upload-btn');
+        const journalFileInfo = document.getElementById('journal-file-info');
+        const journalFileName = document.getElementById('journal-file-name');
+        const journalFileSize = document.getElementById('journal-file-size');
+        const journalRemoveBtn = document.getElementById('journal-remove-file');
+        const journalUploadStatus = document.getElementById('journal-upload-status');
+        const journalUploadMsg = document.getElementById('journal-upload-message');
+        const journalConfigPanel = document.getElementById('journal-upload-config');
+        const journalSheetRow = document.getElementById('journal-sheet-row');
+        const journalSheetSelect = document.getElementById('journal-sheet-select');
+        const journalHeaderRow = document.getElementById('journal-header-row');
+        const journalPreviewTable = document.getElementById('journal-preview-table');
+        const journalPreviewSheetLabel = document.getElementById('journal-preview-sheet-label');
+
+        let journalUploaded = false;
+        let journalPreviewData = null;  // 保存预览数据用于切换 sheet
+
+        journalBrowseBtn.addEventListener('click', () => journalFileInput.click());
+
+        journalFileInput.addEventListener('change', () => handleJournalFileSelect());
+
+        journalUploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            journalUploadArea.classList.add('dragover');
+        });
+
+        journalUploadArea.addEventListener('dragleave', () => {
+            journalUploadArea.classList.remove('dragover');
+        });
+
+        journalUploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            journalUploadArea.classList.remove('dragover');
+            if (e.dataTransfer.files.length) {
+                journalFileInput.files = e.dataTransfer.files;
+                handleJournalFileSelect();
+            }
+        });
+
+        journalRemoveBtn.addEventListener('click', () => {
+            journalFileInput.value = '';
+            journalFileInfo.style.display = 'none';
+            journalConfigPanel.style.display = 'none';
+            journalUploadBtn.disabled = true;
+            journalUploadBtn.style.display = 'inline-flex';
+            journalUploadBtn.textContent = '上传并解析';
+            journalUploadStatus.style.display = 'none';
+            journalUploadArea.classList.remove('has-file');
+            journalUploaded = false;
+            journalPreviewData = null;
+            updateContinueBtn();
+        });
+
+        journalUploadBtn.addEventListener('click', () => uploadJournalFile());
+
+        // Sheet 切换时更新预览
+        journalSheetSelect.addEventListener('change', () => {
+            if (journalPreviewData) {
+                const sheetName = journalSheetSelect.value;
+                const sheetInfo = journalPreviewData.sheets[sheetName];
+                if (sheetInfo) {
+                    renderPreview('journal-preview-table', 'journal-preview-sheet-label', sheetInfo, sheetName);
+                }
+            }
+        });
+
+        // Header row 变化时高亮更新
+        journalHeaderRow.addEventListener('input', () => {
+            if (journalPreviewData) {
+                const sheetName = journalSheetSelect.value || journalPreviewData.sheet_names[0];
+                const sheetInfo = journalPreviewData.sheets[sheetName];
+                if (sheetInfo) {
+                    updateHeaderHighlight('journal-preview-table', parseInt(journalHeaderRow.value) - 1);
+                }
+            }
+        });
+
+        function handleJournalFileSelect() {
+            const file = journalFileInput.files[0];
+            if (!file) return;
+
+            const allowedTypes = ['.xlsx', '.csv'];
+            const fileExt = '.' + file.name.split('.').pop().toLowerCase();
+            if (!allowedTypes.includes(fileExt)) {
+                alert('请选择 .xlsx 或 .csv 格式的文件（不支持 .xls）');
+                journalFileInput.value = '';
+                return;
+            }
+            if (file.size > 2048 * 1024 * 1024) {
+                alert('文件大小不能超过2GB');
+                journalFileInput.value = '';
+                return;
+            }
+
+            journalFileName.textContent = file.name;
+            journalFileSize.textContent = formatFileSize(file.size);
+            journalFileInfo.style.display = 'block';
+            journalUploadBtn.disabled = false;
+            journalUploadArea.classList.add('has-file');
+            journalConfigPanel.style.display = 'none';
+            journalUploadBtn.textContent = '分析中...';
+            journalUploadBtn.disabled = true;
+
+            // 文件选择后自动预览分析
+            previewJournalFile();
+        }
+
+        async function previewJournalFile() {
+            const file = journalFileInput.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/api/upload/preview', { method: 'POST', body: formData });
+                const result = await response.json();
+
+                if (result.success) {
+                    journalPreviewData = result;
+                    showJournalConfig(result);
+                    journalUploadBtn.textContent = '上传并解析';
+                    journalUploadBtn.disabled = false;
+                } else {
+                    alert('文件分析失败: ' + (result.error || '未知错误'));
+                    journalUploadBtn.textContent = '上传并解析';
+                    journalUploadBtn.disabled = false;
+                }
+            } catch (error) {
+                alert('文件分析失败: ' + error.message);
+                journalUploadBtn.textContent = '上传并解析';
+                journalUploadBtn.disabled = false;
+            }
+        }
+
+        function showJournalConfig(data) {
+            journalConfigPanel.style.display = 'block';
+
+            // Sheet 选择器（仅多 sheet 的 xlsx 显示）
+            if (data.file_type === 'excel' && data.sheet_names.length > 1) {
+                journalSheetRow.style.display = 'flex';
+                journalSheetSelect.innerHTML = data.sheet_names.map(name =>
+                    `<option value="${name}">${name}（${data.sheets[name].total_rows} 行）</option>`
+                ).join('');
+            } else {
+                journalSheetRow.style.display = 'none';
+            }
+
+            // 默认显示第一个 sheet
+            const defaultSheet = data.sheet_names[0];
+            const sheetInfo = data.sheets[defaultSheet];
+            renderPreview('journal-preview-table', 'journal-preview-sheet-label', sheetInfo, defaultSheet);
+
+            // 重置 header row
+            journalHeaderRow.value = 1;
+        }
+
+        async function uploadJournalFile() {
+            const file = journalFileInput.files[0];
+            if (!file) return;
+
+            showLoading('正在解析序时账...', '请稍候，系统正在智能解析您的财务数据');
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            // 添加配置参数
+            if (journalSheetSelect.value) {
+                formData.append('sheet_name', journalSheetSelect.value);
+            }
+            formData.append('header_row', journalHeaderRow.value || '1');
+
+            try {
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                let result = await response.json();
+
+                if (result.success) {
+                    journalUploaded = true;
+                    journalUploadBtn.style.display = 'none';
+                    journalUploadStatus.style.display = 'flex';
+                    journalUploadMsg.textContent = '序时账解析成功 ✓';
+                    journalUploadBtn.disabled = true;
+                    updateContinueBtn();
+
+                    // 检查是否有历史映射
+                    checkMappingHistory(file.name);
+                } else {
+                    alert('上传失败: ' + result.error);
+                }
+            } catch (error) {
+                alert('上传失败: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // ============ 原始预览渲染（通用） ============
+        function renderPreview(tableId, labelId, sheetInfo, sheetName) {
+            const table = document.getElementById(tableId);
+            const label = document.getElementById(labelId);
+            const rows = sheetInfo.preview_rows || [];
+            const headerRowIdx = parseInt(document.getElementById('journal-header-row').value) - 1;
+
+            if (label) {
+                label.textContent = '— ' + sheetName;
+            }
+
+            if (!rows.length) {
+                table.innerHTML = '<tr><td style="text-align:center;color:#94a3b8;padding:20px;">文件内容为空</td></tr>';
+                return;
+            }
+
+            // 计算最大列数
+            const maxCols = Math.max(...rows.map(r => r.length));
+
+            let html = '<thead><tr>';
+            // 用列索引作为临时列名
+            for (let c = 0; c < maxCols; c++) {
+                html += `<th>列 ${c + 1}</th>`;
+            }
+            html += '</tr></thead><tbody>';
+
+            rows.forEach((row, ri) => {
+                const isHeader = (ri === headerRowIdx);
+                html += `<tr${isHeader ? ' class="header-row"' : ''}>`;
+                for (let c = 0; c < maxCols; c++) {
+                    const val = c < row.length ? row[c] : '';
+                    html += `<td title="${val.replace(/"/g, '&quot;')}">${val || ''}</td>`;
+                }
+                html += '</tr>';
+            });
+
+            html += '</tbody>';
+            table.innerHTML = html;
+        }
+
+        function updateHeaderHighlight(tableId, headerRowIdx) {
+            const table = document.getElementById(tableId);
+            const rows = table.querySelectorAll('tbody tr');
+            rows.forEach((row, idx) => {
+                if (idx === headerRowIdx) {
+                    row.classList.add('header-row');
+                } else {
+                    row.classList.remove('header-row');
+                }
+            });
+        }
+
+        // ============ 科目余额表上传 ============
+        const balanceFileInput = document.getElementById('balance-file-input');
+        const balanceBrowseBtn = document.getElementById('balance-browse-btn');
+        const balanceUploadArea = document.getElementById('balance-upload-area');
+        const balanceUploadBtn = document.getElementById('balance-upload-btn');
+        const balanceFileInfo = document.getElementById('balance-file-info');
+        const balanceFileName = document.getElementById('balance-file-name');
+        const balanceFileSize = document.getElementById('balance-file-size');
+        const balanceRemoveBtn = document.getElementById('balance-remove-file');
+        const balanceUploadStatus = document.getElementById('balance-upload-status');
+        const balanceUploadMsg = document.getElementById('balance-upload-message');
+        const balanceConfigPanel = document.getElementById('balance-upload-config');
+        const balanceSheetRow = document.getElementById('balance-sheet-row');
+        const balanceSheetSelect = document.getElementById('balance-sheet-select');
+        const balanceHeaderRow = document.getElementById('balance-header-row');
+        const balancePreviewTable = document.getElementById('balance-preview-table');
+        const balancePreviewSheetLabel = document.getElementById('balance-preview-sheet-label');
+
+        let balanceUploaded = false;
+        let balancePreviewData = null;
+
+        balanceBrowseBtn.addEventListener('click', () => balanceFileInput.click());
+
+        balanceFileInput.addEventListener('change', () => handleBalanceFileSelect());
+
+        balanceUploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            balanceUploadArea.classList.add('dragover');
+        });
+
+        balanceUploadArea.addEventListener('dragleave', () => {
+            balanceUploadArea.classList.remove('dragover');
+        });
+
+        balanceUploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            balanceUploadArea.classList.remove('dragover');
+            if (e.dataTransfer.files.length) {
+                balanceFileInput.files = e.dataTransfer.files;
+                handleBalanceFileSelect();
+            }
+        });
+
+        balanceRemoveBtn.addEventListener('click', () => {
+            balanceFileInput.value = '';
+            balanceFileInfo.style.display = 'none';
+            balanceConfigPanel.style.display = 'none';
+            balanceUploadBtn.disabled = true;
+            balanceUploadBtn.style.display = 'inline-flex';
+            balanceUploadBtn.textContent = '上传并解析';
+            balanceUploadStatus.style.display = 'none';
+            balanceUploadArea.classList.remove('has-file');
+            balanceUploaded = false;
+            balancePreviewData = null;
+            updateContinueBtn();
+        });
+
+        balanceUploadBtn.addEventListener('click', () => uploadBalanceFile());
+
+        // Sheet 切换时更新预览
+        balanceSheetSelect.addEventListener('change', () => {
+            if (balancePreviewData) {
+                const sheetName = balanceSheetSelect.value;
+                const sheetInfo = balancePreviewData.sheets[sheetName];
+                if (sheetInfo) {
+                    renderBalancePreview(sheetInfo, sheetName);
+                }
+            }
+        });
+
+        // Header row 变化时高亮更新
+        balanceHeaderRow.addEventListener('input', () => {
+            if (balancePreviewData) {
+                const sheetName = balanceSheetSelect.value || (balancePreviewData.sheet_names ? balancePreviewData.sheet_names[0] : '');
+                const sheetInfo = balancePreviewData.sheets[sheetName];
+                if (sheetInfo) {
+                    updateBalanceHeaderHighlight(parseInt(balanceHeaderRow.value) - 1);
+                }
+            }
+        });
+
+        function handleBalanceFileSelect() {
+            const file = balanceFileInput.files[0];
+            if (!file) return;
+
+            const allowedTypes = ['.xlsx', '.csv'];
+            const fileExt = '.' + file.name.split('.').pop().toLowerCase();
+            if (!allowedTypes.includes(fileExt)) {
+                alert('请选择 .xlsx 或 .csv 格式的文件（不支持 .xls）');
+                balanceFileInput.value = '';
+                return;
+            }
+            if (file.size > 2048 * 1024 * 1024) {
+                alert('文件大小不能超过2GB');
+                balanceFileInput.value = '';
+                return;
+            }
+
+            balanceFileName.textContent = file.name;
+            balanceFileSize.textContent = formatFileSize(file.size);
+            balanceFileInfo.style.display = 'block';
+            balanceUploadBtn.disabled = false;
+            balanceUploadArea.classList.add('has-file');
+            balanceConfigPanel.style.display = 'none';
+            balanceUploadBtn.textContent = '分析中...';
+            balanceUploadBtn.disabled = true;
+
+            // 文件选择后自动预览分析
+            previewBalanceFile();
+        }
+
+        async function previewBalanceFile() {
+            const file = balanceFileInput.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/api/upload/preview', { method: 'POST', body: formData });
+                const result = await response.json();
+
+                if (result.success) {
+                    balancePreviewData = result;
+                    showBalanceConfig(result);
+                    balanceUploadBtn.textContent = '上传并解析';
+                    balanceUploadBtn.disabled = false;
+                } else {
+                    alert('文件分析失败: ' + (result.error || '未知错误'));
+                    balanceUploadBtn.textContent = '上传并解析';
+                    balanceUploadBtn.disabled = false;
+                }
+            } catch (error) {
+                alert('文件分析失败: ' + error.message);
+                balanceUploadBtn.textContent = '上传并解析';
+                balanceUploadBtn.disabled = false;
+            }
+        }
+
+        function showBalanceConfig(data) {
+            balanceConfigPanel.style.display = 'block';
+
+            // Sheet 选择器（仅多 sheet 的 xlsx 显示）
+            if (data.file_type === 'excel' && data.sheet_names.length > 1) {
+                balanceSheetRow.style.display = 'flex';
+                balanceSheetSelect.innerHTML = data.sheet_names.map(name =>
+                    `<option value="${name}">${name}（${data.sheets[name].total_rows} 行）</option>`
+                ).join('');
+            } else {
+                balanceSheetRow.style.display = 'none';
+            }
+
+            // 默认显示第一个 sheet
+            const defaultSheet = data.sheet_names[0];
+            const sheetInfo = data.sheets[defaultSheet];
+            renderBalancePreview(sheetInfo, defaultSheet);
+
+            // 重置 header row
+            balanceHeaderRow.value = 1;
+        }
+
+        function renderBalancePreview(sheetInfo, sheetName) {
+            const rows = sheetInfo.preview_rows || [];
+            const headerRowIdx = parseInt(balanceHeaderRow.value) - 1;
+
+            if (balancePreviewSheetLabel) {
+                balancePreviewSheetLabel.textContent = '— ' + sheetName;
+            }
+
+            if (!rows.length) {
+                balancePreviewTable.innerHTML = '<tr><td style="text-align:center;color:#94a3b8;padding:20px;">文件内容为空</td></tr>';
+                return;
+            }
+
+            const maxCols = Math.max(...rows.map(r => r.length));
+
+            let html = '<thead><tr>';
+            for (let c = 0; c < maxCols; c++) {
+                html += `<th>列 ${c + 1}</th>`;
+            }
+            html += '</tr></thead><tbody>';
+
+            rows.forEach((row, ri) => {
+                const isHeader = (ri === headerRowIdx);
+                html += `<tr${isHeader ? ' class="header-row"' : ''}>`;
+                for (let c = 0; c < maxCols; c++) {
+                    const val = c < row.length ? row[c] : '';
+                    html += `<td title="${String(val).replace(/"/g, '&quot;')}">${val || ''}</td>`;
+                }
+                html += '</tr>';
+            });
+
+            html += '</tbody>';
+            balancePreviewTable.innerHTML = html;
+        }
+
+        function updateBalanceHeaderHighlight(headerRowIdx) {
+            const rows = balancePreviewTable.querySelectorAll('tbody tr');
+            rows.forEach((row, idx) => {
+                if (idx === headerRowIdx) {
+                    row.classList.add('header-row');
+                } else {
+                    row.classList.remove('header-row');
+                }
+            });
+        }
+
+        async function uploadBalanceFile() {
+            const file = balanceFileInput.files[0];
+            if (!file) return;
+
+            showLoading('正在解析科目余额表...', '请稍候，系统正在智能解析您的财务数据');
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            // 添加配置参数
+            if (balanceSheetSelect.value) {
+                formData.append('sheet_name', balanceSheetSelect.value);
+            }
+            formData.append('header_row', balanceHeaderRow.value || '1');
+
+            try {
+                const response = await fetch('/api/upload-balance', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                let result = await response.json();
+
+                if (result.success) {
+                    balanceUploaded = true;
+                    balanceUploadBtn.style.display = 'none';
+                    balanceUploadStatus.style.display = 'flex';
+                    balanceUploadMsg.textContent = '科目余额表解析成功 ✓';
+                    balanceUploadBtn.disabled = true;
+                    updateContinueBtn();
+                } else {
+                    alert('上传失败: ' + result.error);
+                }
+            } catch (error) {
+                alert('上传失败: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // ============ 公共 ============
+        const continueBtn = document.getElementById('continue-btn');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const loadingTitle = document.getElementById('loading-title');
+        const loadingMessage = document.getElementById('loading-message');
+
+        function updateContinueBtn() {
+            continueBtn.disabled = !journalUploaded;
+        }
+
+        continueBtn.addEventListener('click', () => {
+            window.location.href = '/api-config';
+        });
+
+        function showLoading(title, msg) {
+            loadingTitle.textContent = title || '正在处理...';
+            loadingMessage.textContent = msg || '请稍候';
+            loadingOverlay.style.display = 'flex';
+        }
+
+        function hideLoading() {
+            loadingOverlay.style.display = 'none';
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // ============ 历史映射检测 ============
+        const historyBanner = document.getElementById('history-match-banner');
+        const historyFilename = document.getElementById('history-filename');
+        const historyApplyBtn = document.getElementById('history-apply-btn');
+        const historyDismissBtn = document.getElementById('history-dismiss-btn');
+
+        async function checkMappingHistory(filename) {
+            try {
+                const response = await fetch('/api/mapping-history/check');
+                const result = await response.json();
+                if (result.has_match) {
+                    historyFilename.textContent = filename;
+                    historyBanner.style.display = 'block';
+                }
+            } catch (e) {
+                // 静默失败，不影响主流程
+            }
+        }
+
+        historyApplyBtn.addEventListener('click', async () => {
+            try {
+                showLoading('正在加载上次映射...', '即将跳转到API配置页面');
+                const response = await fetch('/api/mapping-history/apply', {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                if (result.success) {
+                    window.location.href = '/api-config';
+                } else {
+                    alert('加载映射记录失败: ' + (result.error || '未知错误'));
+                    hideLoading();
+                }
+            } catch (e) {
+                alert('加载映射记录失败: ' + e.message);
+                hideLoading();
+            }
+        });
+
+        historyDismissBtn.addEventListener('click', () => {
+            historyBanner.style.display = 'none';
+        });
+    </script>
+</body>
+</html>

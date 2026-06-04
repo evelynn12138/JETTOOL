@@ -36,7 +36,10 @@ jobs:
           grep -c "跳过，直接进入查询" templates/integrity-test.html && echo "integrity-test OK" || echo "integrity-test NOT FOUND"
 
       - name: 构建 .exe
+        env:
+          COMMIT_HASH: ${{ github.sha }}
         run: |
+          echo "Build version: $env:COMMIT_HASH"
           pyinstaller `
             --name "DA数据清洗工具" `
             --windowed `
