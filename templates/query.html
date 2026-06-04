@@ -29,18 +29,14 @@
                 </div>
                 <div class="step completed">
                     <span class="step-number">2</span>
-                    <span class="step-text">API配置</span>
-                </div>
-                <div class="step completed">
-                    <span class="step-number">3</span>
                     <span class="step-text">字段映射</span>
                 </div>
                 <div class="step completed">
-                    <span class="step-number">4</span>
+                    <span class="step-number">3</span>
                     <span class="step-text">完整性测试</span>
                 </div>
                 <div class="step active">
-                    <span class="step-number">5</span>
+                    <span class="step-number">4</span>
                     <span class="step-text">查询分析</span>
                 </div>
             </div>
@@ -133,7 +129,7 @@
                             <i class="fas fa-filter"></i> 筛选规则管理
                         </button>
                         <button class="btn btn-small btn-block" onclick="window.location.href='{{ url_for('field_mapper_page') }}'">
-                            <i class="fas fa-cog"></i> 重新配置API
+                            <i class="fas fa-cog"></i> 重新配置字段映射
                         </button>
                     </div>
 
@@ -415,8 +411,13 @@
                 body.style.display = 'block';
                 icon.className = 'fas fa-chevron-down';
                 setTimeout(() => {
-                    if (codeMirrorEditor) codeMirrorEditor.refresh();
-                }, 100);
+                    if (codeMirrorEditor) {
+                        codeMirrorEditor.refresh();
+                        // 修复白条：强制重新计算编辑器高度
+                        const wrapper = codeMirrorEditor.getWrapperElement();
+                        if (wrapper) wrapper.style.height = 'auto';
+                    }
+                }, 200);
             } else if (expand === false || (expand === undefined && !isHidden)) {
                 body.style.display = 'none';
                 icon.className = 'fas fa-chevron-right';
@@ -440,7 +441,7 @@
                 gutters: ['CodeMirror-linenumbers', 'CodeMirror-foldgutter']
             });
 
-            // codeMirrorEditor.setSize('100%', '300px');
+            codeMirrorEditor.setSize('100%', '320px');
         }
 
         // 加载数据信息

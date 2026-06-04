@@ -21,14 +21,26 @@ jobs:
       - name: 安装依赖
         run: |
           pip install --upgrade pip
-          pip install pyinstaller
+          pip install pyinstaller==6.11.0
           pip install -r requirements.txt
+
+      - name: 确认文件版本
+        shell: bash
+        run: |
+          echo "=== 关键文件 ==="
+          ls -la app.py config.py
+          echo "=== config.py 关键行 ==="
+          grep "DIFY_MAIN\|DIFY_REVIEW\|MAX_CONTENT" config.py
+          echo "=== 模板改动验证 ==="
+          grep -c "影响完整性测试" templates/field-mapper.html && echo "field-mapper OK" || echo "field-mapper NOT FOUND"
+          grep -c "跳过，直接进入查询" templates/integrity-test.html && echo "integrity-test OK" || echo "integrity-test NOT FOUND"
 
       - name: 构建 .exe
         run: |
           pyinstaller `
             --name "DA数据清洗工具" `
             --windowed `
+            --add-data "app.py;." `
             --add-data "modules;modules" `
             --add-data "templates;templates" `
             --add-data "static;static" `

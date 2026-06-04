@@ -98,9 +98,14 @@ class ReportCleaner:
                 rows = []
                 max_col = 0
                 for row in ws.iter_rows(values_only=True):
-                    r = [str(c) if c is not None else '' for c in row]
+                    # 对每个 cell 值做 trim（去除前后空白），避免匹配失败
+                    r = [str(c).strip() if c is not None else '' for c in row]
                     max_col = max(max_col, len(r))
                     rows.append(r)
+                # 统一每行列数（补齐空字符串），防止不规则表格列对齐错乱
+                for row in rows:
+                    while len(row) < max_col:
+                        row.append('')
                 self._sheets[name] = {
                     'rows': rows,
                     'total_rows': len(rows),
@@ -112,7 +117,7 @@ class ReportCleaner:
                         d_ws = wb_data[name]
                         d_rows = []
                         for row in d_ws.iter_rows(values_only=True):
-                            d_rows.append([str(c) if c is not None else '' for c in row])
+                            d_rows.append([str(c).strip() if c is not None else '' for c in row])
                         # 替换 formula 行的值
                         for ri in range(min(len(d_rows), len(rows))):
                             for ci in range(min(len(d_rows[ri]), len(rows[ri]))):

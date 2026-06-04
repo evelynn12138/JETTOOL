@@ -10,43 +10,24 @@ class Config:
     PERMANENT_SESSION_LIFETIME = timedelta(hours=1)
 
     # 文件上传配置
-    MAX_CONTENT_LENGTH = 2048 * 1024 * 1024  # 2GB
+    MAX_CONTENT_LENGTH = 4096 * 1024 * 1024  # 4GB（原 2GB，根据用户需求调大）
     UPLOAD_FOLDER = 'temp'
     DUCKDB_DIR = 'temp/db'
     ALLOWED_EXTENSIONS = {'xlsx', 'csv', 'xls'}
 
-    # AI API配置
-    DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
-    DEEPSEEK_MODEL = "deepseek-chat"
-    DEEPSEEK_TEMPERATURE = 0.3
-
-    # Dify 代理配置（作为 LLM 代理层，覆盖所有非 Function Calling 的 AI 调用）
-    DIFY_BASE_URL = "https://ai-platform-uat.ey.net/v1"
-
-    # AI供应商配置
-    AI_PROVIDERS = {
-        "deepseek": {
-            "name": "DeepSeek",
-            "api_url": "https://api.deepseek.com/v1/chat/completions",
-            "model": "deepseek-chat",
-            "doc_url": "https://platform.deepseek.com/api-keys",
-        },
-        "bailian": {
-            "name": "阿里云百炼",
-            "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-            "model": "qwen-plus",
-            "doc_url": "https://bailian.console.aliyun.com/",
-            # 预置加密 API Key（由 SECRET_KEY 加密），用户无需手动输入
-            "encrypted_key": "gAAAAABqECdxLLuKIXVEr5VrpActOhutpUVBdLwSkBpneFTcdkeHcoYOyeiRH4xvShoJNVRRhfaGWI7nlaS7U2CsneGoeNsjosx2ZwcDL-Jo38Z_5rgmDAGYgF5JDcNeBQ1hFKgn7vvW",
-            "pre_configured": True,
-        },
-        "kimi": {
-            "name": "Kimi (月之暗面)",
-            "api_url": "https://api.moonshot.cn/v1/chat/completions",
-            "model": "moonshot-v1-8k",
-            "doc_url": "https://platform.moonshot.cn/console/api-keys",
-        },
-    }
+    # ── Dify Workflow AI 代理配置 ──
+    # 所有 AI 调用（SQL生成、字段映射、报表识别等）通过 Dify Workflow 代理。
+    # Dify 端配置了模型 Qwen3-235B-A3B（temperature=0.7, max_tokens=4096）。
+    #
+    # 【维护说明】
+    # 如需修改 Dify 地址或 Key，请直接修改下方 DIFY_MAIN_* / DIFY_REVIEW_* 的值。
+    #
+    # 主要 Dify Workflow — 用于 SQL 生成、字段映射、报表清洗、AI 差异分析等
+    DIFY_MAIN_BASE_URL = "https://ai-platform-uat.ey.net/v1"
+    DIFY_MAIN_API_KEY = "app-ARr9EIyUv4i5RXPNW2CwdoP5"
+    # 复核 Dify Workflow — 用于 SQL 代码复核审查
+    DIFY_REVIEW_BASE_URL = "https://ai-platform-uat.ey.net/v1"
+    DIFY_REVIEW_API_KEY = "app-uuvpkgtY94HcQLgxDmaR5QLi"
 
     # 数据预览配置
     PREVIEW_ROWS = 10
