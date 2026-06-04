@@ -64,15 +64,9 @@ app.secret_key = Config.SECRET_KEY
 @app.context_processor
 def inject_globals():
     """注入全局模板变量"""
-    import subprocess
-    try:
-        commit = subprocess.check_output(
-            ['git', 'rev-parse', '--short', 'HEAD'],
-            stderr=subprocess.DEVNULL, cwd=os.path.dirname(__file__)
-        ).decode().strip()
-    except Exception:
-        commit = os.environ.get('COMMIT_HASH', 'unknown')
-    return {'app_version': 'v1.2.0', 'commit_hash': commit}
+    import os as _os
+    commit = _os.environ.get('COMMIT_HASH', 'v1.2.0')
+    return {'app_version': 'v1.2.0', 'commit_hash': commit[:8] if len(commit) > 8 else commit}
 
 
 
@@ -1115,10 +1109,9 @@ def integrity_chat():
     try:
         provider = session.get('ai_provider', 'deepseek')
         model = session.get('ai_model')
-        plain_key = crypto_decrypt(api_key, Config.SECRET_KEY)
-        provider_config = Config.AI_PROVIDERS.get(provider, Config.AI_PROVIDERS["deepseek"])
-        api_url = provider_config["api_url"]
-        model_name = model or provider_config["model"]
+        plain_key = api_key  # 功能暂不可用
+        model_name = 'deepseek-chat'
+        api_url = 'https://api.deepseek.com/v1/chat/completions'
 
         history = session.get('integrity_chat_history', [])
         messages = [{"role": "system", "content": INTEGRITY_SYSTEM_PROMPT}]
