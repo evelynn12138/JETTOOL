@@ -24,6 +24,14 @@ jobs:
           pip install pyinstaller==6.11.0
           pip install -r requirements.txt
 
+      - name: 写入构建信息
+        shell: bash
+        run: |
+          echo "BUILD_ID=${{ github.run_id }}-${{ github.run_number }}" > build_info.txt
+          echo "COMMIT_HASH=${{ github.sha }}" >> build_info.txt
+          echo "BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> build_info.txt
+          cat build_info.txt
+
       - name: 确认文件版本
         shell: bash
         run: |
@@ -35,15 +43,22 @@ jobs:
           grep -c "影响完整性测试" templates/field-mapper.html && echo "field-mapper OK" || echo "field-mapper NOT FOUND"
           grep -c "跳过，直接进入查询" templates/integrity-test.html && echo "integrity-test OK" || echo "integrity-test NOT FOUND"
 
+      - name: 清理旧构建缓存
+        run: |
+          pyinstaller --clean --noconfirm run.py 2>&1 | tail -5 || echo "Clean done"
+          Remove-Item -Recurse -Force build, dist, *.spec -ErrorAction SilentlyContinue
+
       - name: 构建 .exe
         env:
           COMMIT_HASH: ${{ github.sha }}
         run: |
           echo "Build version: $env:COMMIT_HASH"
           pyinstaller `
+            --clean `
             --name "DA数据清洗工具" `
             --windowed `
             --add-data "app.py;." `
+            --add-data "build_info.txt;." `
             --add-data "modules;modules" `
             --add-data "templates;templates" `
             --add-data "static;static" `
@@ -59,5 +74,5 @@ jobs:
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: DA数据清洗工具-Windows
+          name: DA数据清洗工具-v${{ github.run_number }}-${{ github.sha }}
           path: dist/DA数据清洗工具/
