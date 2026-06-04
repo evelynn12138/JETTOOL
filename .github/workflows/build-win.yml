@@ -63,6 +63,7 @@ jobs:
             --add-data "templates;templates" `
             --add-data "static;static" `
             --add-data "config.py;." `
+            --add-data "temp/preset_rules.json;temp" `
             --hidden-import flask_session `
             --hidden-import duckdb `
             --hidden-import numpy `

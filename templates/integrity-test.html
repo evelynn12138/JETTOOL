@@ -122,6 +122,57 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- 借正贷负方向调整 -->
+                <div class="settings-section" style="border-top: 1px solid #e5e7eb; padding-top: 16px; margin-top: 16px;">
+                    <div class="reverse-cf-toggle">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="direction-adjust-checkbox">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <div class="toggle-label">
+                            <strong>借正贷负方向调整</strong>
+                            <p id="direction-adjust-hint">开启后，序时账金额将按借贷方向调整正负号（借方为正、贷方为负），适用于数据有"方向"字段且已映射的场景</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 剔除规则 -->
+                <div class="settings-section" style="border-top: 1px solid #e5e7eb; padding-top: 16px; margin-top: 16px;">
+                    <div style="display:flex;flex-direction:column;gap:12px;padding:16px 20px;background:var(--light-gray);border-radius:8px;border:1px solid #e5e7eb;">
+                        <strong style="font-size:14px;color:#333;">剔除规则</strong>
+                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#555;cursor:pointer;">
+                            <input type="checkbox" id="exclude-empty-voucher">
+                            剔除序时账中<strong>凭证编号为空</strong>的记录
+                        </label>
+                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#555;cursor:pointer;">
+                            <input type="checkbox" id="exclude-balance-total">
+                            剔除科目余额表中<strong>含"合计"</strong>的行
+                        </label>
+                    </div>
+                </div>
+
+                <!-- 反结转自定义配置（展开/折叠） -->
+                <div class="settings-section" style="border-top: 1px solid #e5e7eb; padding-top: 16px; margin-top: 16px;">
+                    <div style="display:flex;flex-direction:column;gap:12px;padding:16px 20px;background:var(--light-gray);border-radius:8px;border:1px solid #e5e7eb;">
+                        <div style="display:flex;align-items:center;gap:8px;cursor:pointer;" id="cf-advanced-toggle">
+                            <i class="fas fa-chevron-right" id="cf-advanced-icon" style="font-size:12px;color:var(--secondary-color);"></i>
+                            <strong style="font-size:14px;color:#333;">反结转高级参数 <span style="font-size:11px;color:var(--secondary-color);font-weight:400;">（仅反结转启用时生效）</span></strong>
+                        </div>
+                        <div id="cf-advanced-body" style="display:none;flex-direction:column;gap:12px;">
+                            <div>
+                                <label style="font-size:12px;color:#666;display:block;margin-bottom:4px;">未分配利润/本年利润科目号</label>
+                                <input type="text" id="cf-account-code" value="4103" style="width:200px;padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                                <p style="font-size:11px;color:#999;margin-top:2px;">留空使用默认值 4103</p>
+                            </div>
+                            <div>
+                                <label style="font-size:12px;color:#666;display:block;margin-bottom:4px;">结转摘要关键词（逗号分隔）</label>
+                                <input type="text" id="cf-keywords" value="结转,损益" style="width:300px;padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                                <p style="font-size:11px;color:#999;margin-top:2px;">留空使用默认值：结转, 损益</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- 结果区域 -->
@@ -412,7 +463,12 @@
                     },
                     body: JSON.stringify({
                         reverse_carry_forward: cfCheckbox.checked,
-                        leaf_accounts: leafCheckbox.checked
+                        leaf_accounts: leafCheckbox.checked,
+                        direction_adjustment: document.getElementById('direction-adjust-checkbox').checked,
+                        exclude_empty_voucher: document.getElementById('exclude-empty-voucher').checked,
+                        exclude_balance_total: document.getElementById('exclude-balance-total').checked,
+                        cf_account_code: document.getElementById('cf-account-code').value.trim() || '4103',
+                        cf_keywords: document.getElementById('cf-keywords').value.split(',').map(s => s.trim()).filter(Boolean) || ['结转', '损益']
                     })
                 });
 
@@ -961,6 +1017,18 @@
         // 聊天面板保留但默认隐藏，用户可手动点击右下角按钮打开
         document.addEventListener('DOMContentLoaded', () => {
             // 不再自动触发聊天，保持面板关闭
+
+            // 反结转高级参数折叠/展开
+            const cfToggle = document.getElementById('cf-advanced-toggle');
+            const cfBody = document.getElementById('cf-advanced-body');
+            const cfIcon = document.getElementById('cf-advanced-icon');
+            if (cfToggle) {
+                cfToggle.addEventListener('click', () => {
+                    const isHidden = cfBody.style.display === 'none';
+                    cfBody.style.display = isHidden ? 'flex' : 'none';
+                    if (cfIcon) cfIcon.className = 'fas fa-chevron-' + (isHidden ? 'down' : 'right');
+                });
+            }
         });
     </script>
 

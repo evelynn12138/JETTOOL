@@ -21,9 +21,13 @@ class AICodeGenerator:
         self.api_key = api_key
         self.provider = provider
 
-        # 加载供应商配置（兜底用）
+        # 加载供应商配置（兜底用，dify_client 为 None 时生效）
         from config import Config
-        provider_config = Config.AI_PROVIDERS.get(provider, Config.AI_PROVIDERS["deepseek"])
+        try:
+            api_url = Config.AI_PROVIDERS.get(provider, {}).get("api_url", "") if hasattr(Config, 'AI_PROVIDERS') else ""
+        except Exception:
+            api_url = ""
+        provider_config = {"api_url": api_url, "model": "deepseek-chat"}
 
         self.api_url = api_url or provider_config["api_url"]
         self.model = model or provider_config["model"]

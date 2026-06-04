@@ -464,20 +464,35 @@ def export_integrity_results():
         hfill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
 
         # ====== Sheet 1: 序时账完整性 ======
-        ws1 = wb.active
-        ws1.title = '序时账完整性'
         jrows = _df_to_list(report.get('journal'))
         if jrows:
+            MAX_PER_SHEET = 500000
+            sheet_count = 0
             total = round(_sum_col(jrows, '汇总发生额'), 2)
-            info = [{"指标": "汇总金额", "值": total}, {"指标": "凭证分组数", "值": len(jrows)}]
-            for ri, row in enumerate(info, 1):
-                for ci, (k, v) in enumerate(row.items(), 1):
-                    cell = ws1.cell(row=ri, column=ci, value=v)
-                    if ri == 1:
-                        cell.font = hfont
-                        cell.fill = hfill
-            _write_dicts_to_sheet(ws1, jrows, start_row=4, header_style=True)
+
+            for chunk_start in range(0, len(jrows), MAX_PER_SHEET):
+                chunk = jrows[chunk_start:chunk_start + MAX_PER_SHEET]
+                sheet_count += 1
+
+                if sheet_count == 1:
+                    ws1 = wb.active
+                    ws1.title = '序时账完整性'
+                else:
+                    ws1 = wb.create_sheet(f'序时账完整性({sheet_count})')
+
+                info = [{"指标": "汇总金额", "值": total},
+                        {"指标": "凭证分组数", "值": len(jrows)},
+                        {"指标": "当前Sheet行数", "值": f"第{chunk_start+1}-{chunk_start+len(chunk)}行 / 共{len(jrows)}行"}]
+                for ri, row in enumerate(info, 1):
+                    for ci, (k, v) in enumerate(row.items(), 1):
+                        cell = ws1.cell(row=ri, column=ci, value=v)
+                        if ri == 1:
+                            cell.font = hfont
+                            cell.fill = hfill
+                _write_dicts_to_sheet(ws1, chunk, start_row=5, header_style=True)
         else:
+            ws1 = wb.active
+            ws1.title = '序时账完整性'
             ws1.cell(row=1, column=1, value="提示").font = hfont
             ws1.cell(row=2, column=1, value="无线程账数据或缺少必要字段")
 
@@ -2009,11 +2024,59 @@ def api_report_reconciliation_export():
 
         comparison = result.get("comparison", [])
         stats = result.get("stats", {})
+        balance_data = result.get("balance_data", [])
+        mappings = data.get("mappings", [])
 
         # 生成 Excel
         wb = Workbook()
-        ws = wb.active
-        ws.title = "核对结果"
+
+        # ---- Sheet 1: 科目余额表 + 映射关系 ----
+        ws1 = wb.active
+        ws1.title = "科目余额表与映射"
+        if balance_data:
+            hfont = Font(bold=True, size=11, color="FFFFFF")
+            hfill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+            bborder = Border(bottom=Side(style='thin', color='d9d9d9'))
+
+            # 标题
+            ws1.cell(row=1, column=1, value="科目余额表与报表项目映射关系").font = Font(bold=True, size=14)
+            ws1.merge_cells('A1:E1')
+            ws1.cell(row=2, column=1, value=f"共 {len(balance_data)} 条科目记录").font = Font(size=10, color='666666')
+            ws1.merge_cells('A2:E2')
+
+            # 表头
+            b_headers = ["科目编号", "科目名称", "期末余额", "报表科目名称（映射）", "匹配结果"]
+            for ci, h in enumerate(b_headers, 1):
+                cell = ws1.cell(row=4, column=ci, value=h)
+                cell.font = hfont
+                cell.fill = hfill
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+
+            # 数据行
+            for ri, item in enumerate(balance_data, 5):
+                vals = [
+                    item.get("account_code", ""),
+                    item.get("account_name", ""),
+                    item.get("ending_balance", 0),
+                    item.get("report_item", ""),
+                    "已映射" if item.get("report_item") else "未映射",
+                ]
+                for ci, v in enumerate(vals, 1):
+                    cell = ws1.cell(row=ri, column=ci, value=v)
+                    cell.border = bborder
+                    if ci == 3 and isinstance(v, (int, float)):
+                        cell.number_format = '#,##0.00'
+
+            ws1.column_dimensions['A'].width = 14
+            ws1.column_dimensions['B'].width = 24
+            ws1.column_dimensions['C'].width = 16
+            ws1.column_dimensions['D'].width = 22
+            ws1.column_dimensions['E'].width = 12
+        else:
+            ws1.cell(row=1, column=1, value="无科目余额表数据").font = Font(bold=True)
+
+        # ---- Sheet 2: 核对结果 ----
+        ws = wb.create_sheet("核对结果")
 
         hfont = Font(bold=True, size=11, color="FFFFFF")
         hfill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")

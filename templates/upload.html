@@ -194,7 +194,7 @@
                     <i class="fas fa-cloud-upload-alt upload-icon"></i>
                     <h3>拖拽文件到此处或点击上传</h3>
                     <p class="upload-hint">支持 .xlsx / .csv 格式的序时账/明细账文件（不支持 .xls，请另存为 .xlsx 后上传）</p>
-                    <p class="upload-hint">最大文件大小: 2GB</p>
+                    <p class="upload-hint">最大文件大小: 4GB</p>
 
                     <input type="file" id="journal-file-input" accept=".xlsx,.csv" style="display: none;">
                     <button class="btn btn-primary" id="journal-browse-btn">
@@ -280,7 +280,7 @@
                     <i class="fas fa-cloud-upload-alt upload-icon"></i>
                     <h3>拖拽文件到此处或点击上传</h3>
                     <p class="upload-hint">支持 .xlsx / .csv 格式的科目余额表（不支持 .xls，请另存为 .xlsx 后上传）</p>
-                    <p class="upload-hint">最大文件大小: 2GB</p>
+                    <p class="upload-hint">最大文件大小: 4GB</p>
 
                     <input type="file" id="balance-file-input" accept=".xlsx,.csv" style="display: none;">
                     <button class="btn btn-primary" id="balance-browse-btn">
@@ -461,8 +461,8 @@
                 journalFileInput.value = '';
                 return;
             }
-            if (file.size > 2048 * 1024 * 1024) {
-                alert('文件大小不能超过2GB');
+            if (file.size > 4096 * 1024 * 1024) {
+                alert('文件大小不能超过4GB');
                 journalFileInput.value = '';
                 return;
             }
@@ -717,8 +717,8 @@
                 balanceFileInput.value = '';
                 return;
             }
-            if (file.size > 2048 * 1024 * 1024) {
-                alert('文件大小不能超过2GB');
+            if (file.size > 4096 * 1024 * 1024) {
+                alert('文件大小不能超过4GB');
                 balanceFileInput.value = '';
                 return;
             }
