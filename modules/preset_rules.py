@@ -13,7 +13,8 @@ import time
 import uuid
 from typing import Dict, List, Any, Optional
 
-RULES_FILE = os.path.join('temp', 'preset_rules.json')
+_APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+RULES_FILE = os.path.join(_APP_ROOT, 'temp', 'preset_rules.json')
 
 
 def _load_data() -> dict:

@@ -17,7 +17,6 @@ from modules.mapping_history import save_mapping, find_match
 from modules.audit_trail import log_generate, log_execute
 from modules.preset_rules import get_rules, get_packs, get_custom_rules, get_rule_by_id, apply_rule, save_rule, delete_rule
 from modules.sampling import get_methods, generate_sql
-from modules.crypto_utils import encrypt as crypto_encrypt, decrypt as crypto_decrypt
 from modules.dify_client import DifyClient
 
 # 用于将 session 中的映射（{标准字段名: 源字段名}）转换为前端渲染格式（{stdFieldId: 源字段名}）
@@ -284,9 +283,6 @@ def field_mapper_page():
     data_info = session.get('data_info')
     if not data_info:
         return redirect(url_for('upload_page'))
-
-    if not session.get('api_key'):
-        return redirect(url_for('api_config_page'))
 
     balance_data_info = session.get('balance_data_info')
     has_balance = bool(balance_data_info)
@@ -1097,7 +1093,7 @@ def integrity_chat():
 
     api_key = session.get('api_key')
     if not api_key:
-        return jsonify({'success': False, 'error': '请先在"API配置"步骤配置 API Key'})
+        return jsonify({'success': False, 'error': '完整性测试助手暂不可用，请直接使用上方配置运行测试'})
 
     try:
         provider = session.get('ai_provider', 'deepseek')
@@ -1197,10 +1193,6 @@ def integrity_chat():
 def ai_analyze_integrity():
     """AI 分析完整性测试异常结果 — 从审计视角分析原因并给出建议"""
     results = session.get('integrity_results')
-    api_key = session.get('api_key')
-
-    if not api_key:
-        return jsonify({'success': False, 'error': '请先配置 API Key'})
 
     # 如果还没有测试结果，自动重新跑一遍
     if not results:
@@ -1704,10 +1696,10 @@ def apply_mapping_history():
 
 @app.route('/api-config', methods=['GET'])
 def api_config_page():
-    """API配置页面"""
+    """API配置页面已废弃 — 直接跳转到字段映射"""
     if 'data_info' not in session:
         return redirect(url_for('upload_page'))
-    return render_template('api-config.html')
+    return redirect(url_for('field_mapper_page'))
 
 @app.route('/query', methods=['GET'])
 def query_page():
@@ -1717,8 +1709,8 @@ def query_page():
 
     # 传递数据信息到模板
     data_info = session.get('data_info', {})
-    has_review_config = bool(session.get('review_api_key'))
-    return render_template('query.html', data_info=data_info, has_review_config=has_review_config)
+    # Dify 复核模型始终可用（硬编码配置）
+    return render_template('query.html', data_info=data_info, has_review_config=True)
 
 # 注释掉results页面，因为查询页面已经包含完整的结果展示功能
 # @app.route('/results', methods=['GET'])
@@ -2290,146 +2282,6 @@ def upload_file():
 
     return jsonify(data_info)
 
-@app.route('/api/providers', methods=['GET'])
-def get_providers():
-    """API: 返回所有AI供应商列表"""
-    providers = []
-    for pid, cfg in Config.AI_PROVIDERS.items():
-        info = {
-            'id': pid,
-            'name': cfg['name'],
-            'model': cfg['model'],
-            'doc_url': cfg['doc_url'],
-            'pre_configured': cfg.get('pre_configured', False),
-        }
-        providers.append(info)
-    return jsonify({'success': True, 'providers': providers})
-
-
-@app.route('/api/configure-api', methods=['POST'])
-def configure_api():
-    """API: 配置AI API Key（支持DeepSeek/百炼/Kimi，自动加密存储）"""
-    data = request.json
-    api_key = data.get('api_key', '')
-    provider = data.get('provider', 'deepseek')
-    model = data.get('model')
-
-    # 验证供应商ID
-    if provider not in Config.AI_PROVIDERS:
-        return jsonify({'success': False, 'error': f'不支持的AI供应商: {provider}'})
-
-    provider_cfg = Config.AI_PROVIDERS[provider]
-
-    # 百炼预置密钥：用户不填 key 时自动使用加密存储的内置 key
-    if not api_key and provider_cfg.get('pre_configured') and provider_cfg.get('encrypted_key'):
-        # 内置 Key：解密后再加密存储，保持统一格式
-        plain_key = crypto_decrypt(provider_cfg['encrypted_key'], Config.SECRET_KEY)
-        api_key = crypto_encrypt(plain_key, Config.SECRET_KEY)
-        session['api_key_source'] = 'builtin'
-    elif not api_key:
-        return jsonify({'success': False, 'error': 'API Key不能为空'})
-    else:
-        # 用户手动输入的 key → 加密后存储
-        api_key = crypto_encrypt(api_key, Config.SECRET_KEY)
-        session['api_key_source'] = 'user'
-
-    # 存储到会话（始终加密存储）
-    session['api_key'] = api_key
-    session['ai_provider'] = provider
-    if model:
-        session['ai_model'] = model
-
-    # 复核模型配置（可选）
-    if 'review_api_key' in data:
-        rk = data['review_api_key']
-        if rk:
-            session['review_api_key'] = crypto_encrypt(rk, Config.SECRET_KEY)
-        else:
-            session.pop('review_api_key', None)
-    if 'review_provider' in data:
-        rp = data['review_provider']
-        session['review_provider'] = rp if rp else None
-    if 'review_model' in data:
-        rm = data['review_model']
-        session['review_model'] = rm if rm else None
-    if 'review_api_url' in data:
-        ru = data['review_api_url']
-        session['review_api_url'] = ru if ru else None
-
-    has_balance = bool(session.get('balance_data_info'))
-
-    return jsonify({
-        'success': True,
-        'message': 'API Key已保存',
-        'has_balance_data': has_balance,
-        'pre_configured': session.get('api_key_source') == 'builtin',
-    })
-
-
-# ══════════════════════════════════════════════════════════
-#  Dify 代理配置
-# ══════════════════════════════════════════════════════════
-
-def _get_dify_client():
-    """从 session 获取 Dify 配置并创建客户端"""
-    dify_api_key = session.get('dify_api_key')
-    if not dify_api_key:
-        raise Exception('请先在 API 配置中设置 Dify 代理')
-
-    try:
-        plain_key = crypto_decrypt(dify_api_key, Config.SECRET_KEY)
-    except Exception as e:
-        raise Exception(f'Dify API Key 解密失败，请重新配置: {e}')
-
-    dify_base_url = session.get('dify_base_url') or Config.DIFY_BASE_URL
-    return DifyClient(dify_base_url, plain_key)
-
-
-@app.route('/api/configure-dify', methods=['POST'])
-def configure_dify():
-    """API: 配置 Dify 代理（API URL + API Key，加密存储）"""
-    data = request.json
-    base_url = data.get('base_url', '').strip()
-    api_key = data.get('api_key', '').strip()
-
-    if not base_url:
-        return jsonify({'success': False, 'error': 'Dify API 地址不能为空'})
-    if not api_key:
-        return jsonify({'success': False, 'error': 'Dify API Key 不能为空'})
-
-    # 加密存储 Dify API Key
-    encrypted_key = crypto_encrypt(api_key, Config.SECRET_KEY)
-
-    session['dify_api_key'] = encrypted_key
-    session['dify_base_url'] = base_url
-    session.modified = True
-
-    # 测试连接
-    try:
-        client = DifyClient(base_url, api_key)
-        client.chat("你是一个测试助手", "回复OK即可", timeout=10)
-        return jsonify({'success': True, 'message': 'Dify 代理配置已保存，连接测试通过'})
-    except Exception as e:
-        # 配置保存成功但测试失败，不阻塞
-        app.logger.warning(f"[DIFY] 配置测试连接失败: {e}")
-        return jsonify({
-            'success': True,
-            'warning': str(e),
-            'message': 'Dify 代理配置已保存，但连接测试未通过，请检查地址和 Key 是否正确'
-        })
-
-
-@app.route('/api/dify-status', methods=['GET'])
-def dify_status():
-    """API: 返回 Dify 代理配置状态"""
-    configured = bool(session.get('dify_api_key'))
-    base_url = session.get('dify_base_url') or Config.DIFY_BASE_URL
-    return jsonify({
-        'success': True,
-        'configured': configured,
-        'base_url': base_url if configured else None,
-    })
-
 
 @app.route('/api/review-code', methods=['POST'])
 def review_code():
@@ -2479,8 +2331,8 @@ def review_code():
   ]
 }}"""
 
-        # 通过 Dify 代理调用 AI
-        dify = _get_dify_client()
+        # 通过复核 Dify Workflow 调用 AI
+        dify = _get_review_dify_client()
         content = dify.chat(
             "你是一名资深的 SQL 审查专家。只输出 JSON，不要加 Markdown 代码块包裹。",
             prompt,
@@ -3243,6 +3095,26 @@ def debug_duckdb_info():
 def allowed_file(filename):
     """检查文件扩展名是否允许"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in Config.ALLOWED_EXTENSIONS
+
+
+# ══════════════════════════════════════════════════════════
+#  Dify 客户端工厂函数（硬编码配置，无需用户设置）
+# ══════════════════════════════════════════════════════════
+
+def _get_dify_client():
+    """获取主 Dify Workflow 客户端（SQL生成、字段映射、报表清洗等）
+
+    配置在 config.py 的 DIFY_MAIN_* 变量中，修改后重启应用生效。
+    """
+    return DifyClient(Config.DIFY_MAIN_BASE_URL, Config.DIFY_MAIN_API_KEY)
+
+
+def _get_review_dify_client():
+    """获取复核 Dify Workflow 客户端（SQL 代码复核审查）
+
+    配置在 config.py 的 DIFY_REVIEW_* 变量中，修改后重启应用生效。
+    """
+    return DifyClient(Config.DIFY_REVIEW_BASE_URL, Config.DIFY_REVIEW_API_KEY)
 
 
 def cleanup_stale_files():

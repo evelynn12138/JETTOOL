@@ -10,7 +10,8 @@ import hashlib
 import time
 from typing import Dict, List, Any, Optional
 
-HISTORY_PATH = os.path.join('temp', 'mapping_history.json')
+_APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HISTORY_PATH = os.path.join(_APP_ROOT, 'temp', 'mapping_history.json')
 
 
 def _load_entries() -> List[Dict[str, Any]]:

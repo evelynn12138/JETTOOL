@@ -105,7 +105,7 @@
             <div class="header-top">
                 <div class="header-left">
                     <img src="/static/images/ey-logo.png" alt="EY" class="ey-logo">
-                    <a href="{{ url_for('api_config_page') }}" class="back-link">
+                    <a href="{{ url_for('upload_page') }}" class="back-link">
                         <i class="fas fa-arrow-left"></i>
                     </a>
                     <i class="fas fa-project-diagram header-page-icon"></i>
@@ -117,20 +117,16 @@
                     <span class="step-number">1</span>
                     <span class="step-text">上传文件</span>
                 </div>
-                <div class="step completed">
-                    <span class="step-number">2</span>
-                    <span class="step-text">API配置</span>
-                </div>
                 <div class="step active">
-                    <span class="step-number">3</span>
+                    <span class="step-number">2</span>
                     <span class="step-text">字段映射</span>
                 </div>
                 <div class="step">
-                    <span class="step-number">4</span>
+                    <span class="step-number">3</span>
                     <span class="step-text">完整性测试</span>
                 </div>
                 <div class="step">
-                    <span class="step-number">5</span>
+                    <span class="step-number">4</span>
                     <span class="step-text">查询分析</span>
                 </div>
             </div>
@@ -180,6 +176,17 @@
                         请将您的数据字段映射到系统标准字段。系统已根据关键词自动推荐映射关系。
                         <br><strong>科目编号、凭证号</strong>为必填字段。若数据不含金额但有借方和贷方，系统将自动计算<strong>金额 = 借方 - 贷方</strong>。
                     </p>
+
+                    <!-- 方向/借贷字段重要提示 -->
+                    <div style="display:flex;gap:12px;padding:14px 18px;margin-bottom:18px;background:rgba(245,158,11,0.08);border:1px solid #f59e0b;border-radius:8px;align-items:flex-start;">
+                        <i class="fas fa-exclamation-triangle" style="color:#d97706;font-size:20px;flex-shrink:0;margin-top:1px;"></i>
+                        <div style="font-size:13px;color:#92400e;line-height:1.7;">
+                            <strong style="color:#b45309;">重要：影响完整性测试结果的字段映射</strong><br>
+                            • <strong>「方向」字段</strong>：如果您的序时账有「借/贷」方向列，建议映射此字段。完整性测试将根据借贷方向自动调整金额正负（借为正、贷为负），让余额方向统一。不映射则金额按原始值入账。<br>
+                            • <strong>「借方」/「贷方」字段</strong>：如果数据包含借贷两列但<strong>没有单独的金额列</strong>，系统会自动计算 <code>金额 = 借方 − 贷方</code>。请确保借方和贷方都已正确映射。<br>
+                            • <strong>「金额」字段</strong>：如果数据已有净额列（借贷抵减后的金额），直接映射金额即可，无需映射借方和贷方。
+                        </div>
+                    </div>
 
                     <div class="mapping-table-container">
                         <table class="mapping-table">
@@ -299,7 +306,7 @@
 
             <!-- 底部操作按钮 -->
             <div class="action-buttons">
-                <button class="btn btn-secondary" onclick="window.location.href='{{ url_for('api_config_page') }}'">
+                <button class="btn btn-secondary" onclick="window.location.href='{{ url_for('upload_page') }}'">
                     <i class="fas fa-arrow-left"></i> 返回上一步
                 </button>
                 <button class="btn btn-primary" id="save-mapping-btn">

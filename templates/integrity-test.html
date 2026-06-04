@@ -27,18 +27,14 @@
                 </div>
                 <div class="step completed">
                     <span class="step-number">2</span>
-                    <span class="step-text">API配置</span>
-                </div>
-                <div class="step completed">
-                    <span class="step-number">3</span>
                     <span class="step-text">字段映射</span>
                 </div>
                 <div class="step active">
-                    <span class="step-number">4</span>
+                    <span class="step-number">3</span>
                     <span class="step-text">完整性测试</span>
                 </div>
                 <div class="step">
-                    <span class="step-number">5</span>
+                    <span class="step-number">4</span>
                     <span class="step-text">查询分析</span>
                 </div>
             </div>
@@ -79,6 +75,13 @@
                     </div>
                     <p>两表数据能不能对上——按科目汇总，检查序时账与科目余额表的发生额是否一致</p>
                 </div>
+            </div>
+
+            <!-- 快捷操作：可快速跳过进入查询 -->
+            <div style="display:flex;justify-content:flex-end;margin-bottom:24px;">
+                <button class="btn btn-secondary" id="skip-btn-top" onclick="window.location.href='/query'" style="font-size:14px;padding:8px 18px;">
+                    <i class="fas fa-forward"></i> 跳过，直接进入查询
+                </button>
             </div>
 
             <!-- 高级设置：反结转 + 末级科目 -->
@@ -954,10 +957,9 @@
         document.getElementById('run-tests-btn').addEventListener('click', runTests);
         document.getElementById('skip-btn').addEventListener('click', goToQuery);
 
-        // 自动运行测试
+        // 聊天面板保留但默认隐藏，用户可手动点击右下角按钮打开
         document.addEventListener('DOMContentLoaded', () => {
-            // 页面加载后自动打招呼，引导用户进行完整性测试
-            setTimeout(() => sendChatMessage('你好，请开始引导'), 300);
+            // 不再自动触发聊天，保持面板关闭
         });
     </script>
 
