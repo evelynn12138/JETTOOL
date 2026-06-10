@@ -34,6 +34,7 @@ JOURNAL_NAME_TO_ID = {f['name']: f['id'] for f in [
     {"id": "department", "name": "部门"},
     {"id": "person", "name": "制单人"},
     {"id": "direction", "name": "方向"},
+    {"id": "currency", "name": "币种"},
 ]}
 BALANCE_NAME_TO_ID = {f['name']: f['id'] for f in [
     {"id": "company", "name": "公司名"},
@@ -47,6 +48,7 @@ BALANCE_NAME_TO_ID = {f['name']: f['id'] for f in [
     {"id": "ending", "name": "期末余额"},
     {"id": "beginning_direction", "name": "期初余额方向"},
     {"id": "ending_direction", "name": "期末余额方向"},
+    {"id": "currency", "name": "币种"},
 ]}
 
 app = Flask(__name__)
@@ -337,22 +339,126 @@ def integrity_test_page():
     if 'data_info' not in session:
         return redirect(url_for('upload_page'))
 
-    # 检查方向字段是否已映射（mapped_fields 可能是列表或字典）
-    data_info = session.get('data_info', {})
-    mapped_fields = data_info.get('mapped_fields', {})
-    if isinstance(mapped_fields, list):
-        has_direction_field = any(
-            isinstance(f, dict) and f.get('name') == 'direction'
-            and f.get('original_name')
-            for f in mapped_fields
-        )
-    elif isinstance(mapped_fields, dict):
-        has_direction_field = bool(mapped_fields.get('direction'))
+    # 检查字段映射状态（从 mapped_fields 和 field_mapping 两个来源）
+    field_mapping = session.get('field_mapping', {}) or {}
+    balance_field_mapping = session.get('balance_field_mapping', {}) or {}
+
+    manual_fills = session.get('manual_fills', {}) or {}
+    balance_manual_fills = session.get('balance_manual_fills', {}) or {}
+
+    def _is_mapped(field_id):
+        """检查某个标准字段是否已被映射到用户列或手动填写"""
+        # 来源1：field_mapping {标准id: 源列名}
+        if field_mapping.get(field_id):
+            return True
+        # 来源2：manual_fills (手动填写的值，如币种)
+        if manual_fills.get(field_id):
+            return True
+        # 来源3：data_info['mapped_fields'] (列表结构)
+        data_info = session.get('data_info', {})
+        mf = data_info.get('mapped_fields', [])
+        if isinstance(mf, list):
+            if any(isinstance(f, dict) and f.get('name') == field_id and f.get('original_name') for f in mf):
+                return True
+        elif isinstance(mf, dict) and mf.get(field_id):
+            return True
+        # 来源4：实际 DuckDB 表中是否存在该列（最可靠）
+        if session.get('duckdb_imported'):
+            cn_name = {'direction': '方向', 'currency': '币种', 'debit': '借方',
+                       'credit': '贷方', 'amount': '金额'}.get(field_id)
+            if cn_name:
+                try:
+                    engine = get_duckdb_engine()
+                    if engine:
+                        return cn_name in {c['name'] for c in engine.get_schema('data')}
+                except Exception:
+                    pass
+        return False
+
+    def _is_balance_mapped(field_id):
+        if balance_field_mapping.get(field_id):
+            return True
+        if balance_manual_fills.get(field_id):
+            return True
+        balance_info = session.get('balance_data_info', {})
+        mf = balance_info.get('mapped_fields', [])
+        if isinstance(mf, list):
+            if any(isinstance(f, dict) and f.get('name') == field_id and f.get('original_name') for f in mf):
+                return True
+        elif isinstance(mf, dict) and mf.get(field_id):
+            return True
+        return False
+
+    has_direction_field = _is_mapped('direction')
+    has_currency_field = _is_mapped('currency')
+    has_balance_currency = _is_balance_mapped('currency')
+
+    # 获取币种实际值（供前端下拉选择用，仅查科目余额表）
+    currency_values = []
+    if has_balance_currency:
+        try:
+            engine = get_duckdb_engine()
+            if engine and session.get('duckdb_imported'):
+                for tbl in ['balance_data']:
+                    if engine.table_exists(tbl):
+                        try:
+                            cols = [c['name'] for c in engine.get_schema(tbl)]
+                            if '币种' in cols:
+                                rows = engine._conn.execute(
+                                    f'SELECT DISTINCT CAST("币种" AS VARCHAR) FROM "{tbl}" '
+                                    f'WHERE "币种" IS NOT NULL AND CAST("币种" AS VARCHAR) != \'\''
+                                ).fetchall()
+                                for r in rows:
+                                    v = r[0].strip()
+                                    if v and v not in currency_values:
+                                        currency_values.append(v)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+    # 自动检测金额处理模式
+    has_amount = _is_mapped('amount')
+    has_debit = _is_mapped('debit')
+    has_credit = _is_mapped('credit')
+    if has_direction_field and has_amount:
+        amount_mode = 'direction_amount'  # 方向+金额
+    elif has_debit and has_credit:
+        amount_mode = 'debit_credit'      # 借方-贷方
+    elif has_amount:
+        amount_mode = 'direct'            # 直接有发生额
     else:
-        has_direction_field = False
+        amount_mode = 'direction_amount'  # 兜底
+
+    # 智能建议：分析数据特征，生成处理建议
+    suggestions = []
+    if session.get('duckdb_imported'):
+        try:
+            engine = get_duckdb_engine()
+            if engine:
+                from modules.integrity_checker import IntegrityChecker
+                journal_table = 'journal_filtered' if engine.table_exists('journal_filtered') else 'data'
+                balance_table = 'balance_adjusted' if engine.table_exists('balance_adjusted') \
+                               else 'balance_leaf' if engine.table_exists('balance_leaf') \
+                               else 'balance_integrity' if engine.table_exists('balance_integrity') \
+                               else 'balance_data' if engine.table_exists('balance_data') \
+                               else None
+                checker = IntegrityChecker(
+                    engine,
+                    journal_table=journal_table if engine.table_exists(journal_table) else 'data',
+                    balance_table=balance_table,
+                )
+                suggestions = checker.get_suggestions(has_direction_field=has_direction_field)
+        except Exception as e:
+            app.logger.warning(f"[SUGGESTIONS] 建议生成失败: {e}")
 
     return render_template('integrity-test.html',
-                           has_direction_field=has_direction_field)
+                           has_direction_field=has_direction_field,
+                           has_currency_field=has_currency_field,
+                           has_balance_currency=has_balance_currency,
+                           amount_mode=amount_mode,
+                           suggestions=suggestions,
+                           currency_values=currency_values)
 
 @app.route('/api/upload-balance', methods=['POST'])
 def upload_balance_file():
@@ -418,6 +524,7 @@ def run_integrity_tests():
         leaf_accts = data.get('leaf_accounts', False)
         cf_account_code = data.get('cf_account_code', '4103')
         cf_keywords = data.get('cf_keywords', ['结转', '损益'])
+        currency_filter = (data.get('currency_filter') or '').strip()
 
         engine = get_duckdb_engine()
         table_name = 'data' if engine.table_exists('data') else None
@@ -425,6 +532,22 @@ def run_integrity_tests():
 
         if not table_name:
             return jsonify({'success': False, 'error': '序时账数据为空，请先上传并配置字段映射'})
+
+        # 币种筛选：如果选了具体币种，创建过滤视图
+        if currency_filter and balance_table:
+            try:
+                b_schema = {c['name'] for c in engine.get_schema(balance_table)}
+                if '币种' in b_schema:
+                    engine._conn.execute(f'DROP VIEW IF EXISTS "balance_currency_filtered"')
+                    engine._conn.execute(f'''
+                        CREATE TEMP VIEW "balance_currency_filtered" AS
+                        SELECT * FROM "{balance_table}"
+                        WHERE CAST("币种" AS VARCHAR) = '{currency_filter}'
+                           OR "币种" IS NULL OR CAST("币种" AS VARCHAR) = ''
+                    ''')
+                    balance_table = 'balance_currency_filtered'
+            except Exception as e:
+                app.logger.warning(f"[CURRENCY FILTER] 币种筛选失败: {e}，使用全部数据")
 
         checker = IntegrityChecker(engine, journal_table=table_name, balance_table=balance_table)
         results = checker.run_all(
@@ -1460,6 +1583,15 @@ def configure_fields():
     has_balance = bool(session.get('balance_data_info'))
 
     # ---- 导入数据到 DuckDB ----
+    # 标准字段 ID → 中文列名映射（manual_fills 存的是 ID，DuckDB 需要中文列名）
+    _ID_TO_COL = {f['id']: f['name'] for f in [
+        {"id": "company", "name": "公司名"},
+        {"id": "currency", "name": "币种"},
+    ]}
+    def _convert_constants(mf):
+        if not mf: return None
+        return {_ID_TO_COL.get(k, k): v for k, v in mf.items()}
+
     # 重新导入数据时清除旧对话历史
     session.pop('integrity_chat_history', None)
     import_success = False
@@ -1470,7 +1602,7 @@ def configure_fields():
         upload_opts = session.get('upload_options', {})
         sheet_name = upload_opts.get('sheet_name')
         header_row = upload_opts.get('header_row')
-        constant_cols = session.get('manual_fills') or None
+        constant_cols = _convert_constants(session.get('manual_fills'))
         if filepath and field_mapping:
             ext = os.path.splitext(filepath)[1].lower()
             reverse_mapping = {v: k for k, v in field_mapping.items()}
@@ -1509,7 +1641,7 @@ def configure_fields():
 
         balance_filepath = session.get('balance_filepath')
         balance_field_mapping = session.get('balance_field_mapping')
-        balance_constant_cols = session.get('balance_manual_fills') or None
+        balance_constant_cols = _convert_constants(session.get('balance_manual_fills'))
         balance_upload_opts = session.get('balance_upload_options', {})
         balance_sheet_name = balance_upload_opts.get('sheet_name')
         balance_header_row = balance_upload_opts.get('header_row')
@@ -2064,26 +2196,80 @@ def api_report_reconciliation_export():
 
             # 标题
             ws1.cell(row=1, column=1, value="科目余额表与报表项目映射关系").font = Font(bold=True, size=14)
-            ws1.merge_cells('A1:E1')
+            ws1.merge_cells('A1:F1')
             ws1.cell(row=2, column=1, value=f"共 {len(balance_data)} 条科目记录").font = Font(size=10, color='666666')
-            ws1.merge_cells('A2:E2')
+            ws1.merge_cells('A2:F2')
 
             # 表头
-            b_headers = ["科目编号", "科目名称", "期末余额", "报表科目名称（映射）", "匹配结果"]
+            b_headers = ["科目编号", "科目名称", "期末余额", "报表科目名称（映射）", "匹配结果", "科目类型（参考）"]
             for ci, h in enumerate(b_headers, 1):
                 cell = ws1.cell(row=4, column=ci, value=h)
                 cell.font = hfont
                 cell.fill = hfill
                 cell.alignment = Alignment(horizontal="center", vertical="center")
 
+            # 科目类型判定（优先按已映射的报表科目判断，兜底按编号前缀）
+            def _normalize_item(name: str) -> str:
+                """去除报表科目名的中文编号前缀、异体字"""
+                import re
+                s = name.strip()
+                s = re.sub(r'^[（(]?[一二三四五六七八九十百千\d]+[）).、、\s]*', '', s)
+                s = s.replace('帐', '账').replace('（', '(').replace('）', ')')
+                s = s.replace(' ', '').replace('　', '')
+                return s
+
+            REPORT_ITEM_KEYWORDS = {
+                'Assets': ['货币资金', '交易性金融资产', '应收票据', '应收账款', '应收帐款', '预付款项',
+                           '应收股利', '应收利息', '其他流动资产', '其他应收款',
+                           '存货', '持有至到期投资', '可供出售金融资产', '长期股权投资',
+                           '投资性房地产', '固定资产', '在建工程', '工程物资', '固定资产清理',
+                           '无形资产', '累计摊销', '长期待摊费用', '递延所得税资产',
+                           '其他非流动资产', '坏账准备'],
+                'Liabilities': ['短期借款', '交易性金融负债', '应付票据', '应付账款', '应付帐款',
+                               '预收款项', '预收账款', '应付职工薪酬', '应交税费',
+                               '应付利息', '应付股利', '其他应付款',
+                               '长期借款', '应付债券', '长期应付款', '预计负债',
+                               '递延所得税负债'],
+                'Equity': ['实收资本', '股本', '资本公积', '盈余公积', '未分配利润',
+                          '本年利润', '利润分配', '以前年度损益调整'],
+                # Revenue: 仅营业收入/主营业务收入/其他业务收入
+                'Revenue': ['营业收入', '主营业务收入', '其他业务收入'],
+                # Expenses: 剩下的所有损益类
+                'Expenses': ['营业成本', '主营业务成本', '其他业务成本', '营业外收入',
+                           '营业外支出', '投资收益', '公允价值变动收益', '资产处置收益',
+                           '税金及附加', '销售费用', '营业费用', '管理费用', '财务费用',
+                           '研发费用', '资产减值损失', '信用减值损失', '所得税费用',
+                           '以前年度损益调整'],
+            }
+
+            def _acct_type(code: str, report_item: str = '') -> str:
+                ri = _normalize_item(report_item) if report_item else ''
+                if ri:
+                    for atype, keywords in REPORT_ITEM_KEYWORDS.items():
+                        if any(kw in ri for kw in keywords):
+                            return atype
+                # 兜底：按编号前缀
+                c = str(code).strip()
+                if not c or not c[0].isdigit():
+                    return 'Other'
+                p = c[0]
+                if p == '1': return 'Assets'
+                if p == '2': return 'Liabilities'
+                if p in ('3', '4'): return 'Equity'
+                if p == '5': return 'Assets'
+                if p == '6': return 'Expenses'  # 6xxx 默认全部 Expenses
+                return 'Other'
+
             # 数据行
             for ri, item in enumerate(balance_data, 5):
+                ac = str(item.get("account_code", ""))
                 vals = [
-                    item.get("account_code", ""),
+                    ac,
                     item.get("account_name", ""),
                     item.get("ending_balance", 0),
                     item.get("report_item", ""),
                     "已映射" if item.get("report_item") else "未映射",
+                    _acct_type(ac, item.get("report_item", "")),
                 ]
                 for ci, v in enumerate(vals, 1):
                     cell = ws1.cell(row=ri, column=ci, value=v)
@@ -2096,6 +2282,7 @@ def api_report_reconciliation_export():
             ws1.column_dimensions['C'].width = 16
             ws1.column_dimensions['D'].width = 22
             ws1.column_dimensions['E'].width = 12
+            ws1.column_dimensions['F'].width = 16
         else:
             ws1.cell(row=1, column=1, value="无科目余额表数据").font = Font(bold=True)
 
@@ -3371,6 +3558,20 @@ def cleanup_stale_files():
             app.logger.info(f"[CLEANUP STARTUP]   已删除: {p}")
     else:
         app.logger.info("[CLEANUP STARTUP] 无需清理（无过期文件）")
+
+
+@app.errorhandler(404)
+def api_not_found(e):
+    if request.path.startswith('/api/'):
+        return jsonify({'success': False, 'error': '接口不存在'}), 404
+    return e
+
+@app.errorhandler(500)
+def api_server_error(e):
+    app.logger.error(f"[500 ERROR] {request.method} {request.path}: {e}")
+    if request.path.startswith('/api/'):
+        return jsonify({'success': False, 'error': f'服务器内部错误: {str(e)}'}), 500
+    return e
 
 
 if __name__ == '__main__':

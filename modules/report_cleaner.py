@@ -294,7 +294,9 @@ class ReportCleaner:
 
         try:
             data_start = meta.get("data_start_row", 4) - 1  # 转 0-indexed
-            data_end = meta.get("data_end_row", len(all_rows))  # 已经是 1-indexed
+            # 不依赖 AI 的 data_end_row（AI 只看了前 10 行，中间空行会被误判为结尾）
+            # 所有行都交给行级过滤逻辑处理
+            data_end = len(all_rows)
             columns_def = meta.get("columns", [])
             layout = meta.get("layout_type", "single_side")
             skip_kw = meta.get("skip_keywords", self.DEFAULT_SKIP_KEYWORDS)

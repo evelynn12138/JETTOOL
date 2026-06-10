@@ -7,14 +7,14 @@ DA数据清洗业务AI应用是一个基于 Flask 的本地财务数据查询分
 **技术栈：**
 - 后端：Flask 3.0 + Flask-Session（服务端文件存储）
 - 数据处理：DuckDB + Pandas 2.1
-- AI 接口：兼容 OpenAI 协议的 API（DeepSeek / 百炼 / Kimi 等）
+- AI 接口：Dify Workflow API（Qwen3），支持 env DEEPSEEK_API_KEY 降级 Direct API
 - SQL 生成：AI 生成 DuckDB SQL，本地引擎执行
 - 财务报表清洗：AI 识别结构（读前 10 行）+ 规则引擎提取（无二次 AI 调用）
-- 科目余额表核对：规则映射引擎（编号前缀 60+ 规则 + 名称关键词 40+ 规则）+ 模糊匹配 + AI 差异分析
+- 科目余额表核对：规则映射引擎 + 模糊匹配 + 贪心爬山优化 + AI 差异分析
 - 数据加密：Fernet 对称加密（API Key 存储）
 - Excel 读写：openpyxl 3.1
 - 前端：原生 HTML/CSS/JS（无前端框架），CodeMirror 代码编辑器
-- 桌面端：Electron 包装
+- 桌面端：PyInstaller 打包 Windows .exe（GitHub Actions）
 
 ---
 
@@ -47,15 +47,15 @@ DA数据清洗业务AI应用/
 ├── templates/                      # Jinja2 页面模板（5 步流程 + 扩展功能）
 │   ├── intro.html                  # 产品介绍首页
 │   ├── upload.html                 # 步骤1：文件上传（含 sheet/表头配置）
-│   ├── api-config.html             # 步骤2：API Key 配置（多供应商）
-│   ├── field-mapper.html           # 步骤3：字段映射 + AI 智能映射
-│   ├── integrity-test.html         # 步骤4：完整性测试 + 财务报表清洗 + 科目余额表核对
-│   └── query.html                  # 步骤5：自然语言查询分析
+│   ├── api-config.html             # 已废弃
+│   ├── field-mapper.html           # 步骤2：字段映射（含币种/金额模式）
+│   ├── integrity-test.html         # 步骤3：完整性测试（4步引导）+ 报表清洗 + 核对
+│   └── query.html                  # 步骤4：自然语言查询分析
 │
 ├── static/                         # 静态资源
 │   ├── css/style.css
 │   ├── js/app.js
-│   └── js/report-cleaner.js        # 财务报表清洗 + 核对前端逻辑
+│   └── js/report-cleaner.js        # 报表清洗 + 核对 + 优化前端逻辑
 │
 ├── electron/                       # Electron 桌面包装
 │   └── main.js
@@ -71,7 +71,7 @@ DA数据清洗业务AI应用/
 ## 三、5 步工作流
 
 ```
-[上传文件] → [API 配置] → [字段映射] → [完整性测试(可选)]  → [查询分析]
+[上传文件] → [字段映射] → [完整性测试(可选)] → [查询分析]
   步骤1         步骤2          步骤3        ↓                    步骤5
                                           [财务报表清洗]           
                                           ↓                      
@@ -88,15 +88,10 @@ DA数据清洗业务AI应用/
 - **增强功能**：支持选择 Sheet 页、自定义表头行号、预览前 5 行
 - 关键操作：`DataProcessor.process()` 加载文件前 100 行进行分析，识别字段类型（text/number/date），生成预览数据
 
-### 第 2 步：API 配置
-- 支持多个 AI 供应商：DeepSeek、百炼、Kimi
-- 每个供应商有预配置的 API URL 和模型名（在 `config.py` 的 `AI_PROVIDERS` 中定义）
-- 可自定义 API URL 和模型名
-- 提交 `POST /api/configure-api` → API Key 经 `crypto_utils.encrypt()` 加密后存于 session
-- 不持久化到磁盘
-- **复核模型配置（可选）**：可独立配置第二 AI 模型用于自动复核主模型生成的 SQL 代码
-  - 独立的 API Key、供应商、模型名、API 地址
-  - 留空则复用主模型配置
+### 第 2 步：字段映射（原 API 配置步骤已移除）
+- API 配置已移除，改为硬编码 Dify Workflow API（config.py 中 DIFY_MAIN_* / DIFY_REVIEW_*）
+- 可通过环境变量 `DEEPSEEK_API_KEY` 降级为 Direct API 调用
+- 支持自定义模型和 API 地址：`DIRECT_MODEL`、`DIRECT_API_URL`
 
 ### 第 3 步：字段映射
 - 前端将文件原始字段映射到标准字段（11 个序时账字段 + 科目余额表字段）
@@ -355,7 +350,7 @@ def expand_keywords(text: str) -> str
 - `expand_keywords()`：匹配到关键词后追加"等相关关键词"（不使用括号标注，避免误导 SQL 生成）
 - 查询优化流程：本地词典扩展 → AI 优化（合并两者结果）
 
-### 4.7 其他模块
+### 4.8 其他模块
 
 **`crypto_utils.py`**：
 - 使用 `cryptography.fernet.Fernet` 对称加密
@@ -936,7 +931,7 @@ lsof -ti:5003 | xargs kill -9
 4. 等待几分钟，下载 **DA数据清洗工具-Windows** 工件（artifact）
 5. 解压后双击 `DA数据清洗工具.exe` 即可运行
 
-> 推送 git tag（如 `v1.0`）也会自动触发构建。
+> 推送 git tag（如 `v1.3.0`）也会自动触发构建。
 
 ### 方式二：Windows 本机构建
 

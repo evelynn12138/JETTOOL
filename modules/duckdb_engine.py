@@ -47,8 +47,8 @@ class DuckDBEngine:
         needs_pandas = constant_columns is not None and len(constant_columns) > 0
 
         if needs_pandas or header_row is not None:
-            # 使用 Pandas 读取以支持自定义表头行/常量列
-            df = pd.read_csv(csv_path, header=header_row if header_row is not None else 0)
+            # 使用 Pandas 读取以支持自定义表头行/常量列（尝试常见编码）
+            df = _read_csv_with_encoding(csv_path, header=header_row if header_row is not None else 0)
             print(f"[DUCKDB IMPORT_CSV] 自定义表头行 header_row={header_row}, {len(df)} 行, 列: {list(df.columns)}")
             if rename_mapping:
                 df = df.rename(columns=rename_mapping)
@@ -82,7 +82,7 @@ class DuckDBEngine:
                 FROM read_csv_auto('{csv_path}', {csv_options})
             """)
         elif rename_mapping:
-            df = pd.read_csv(csv_path, nrows=1)
+            df = _read_csv_with_encoding(csv_path, nrows=1)
             csv_columns = list(df.columns)
 
             select_parts = []
@@ -122,6 +122,14 @@ class DuckDBEngine:
             """)
 
         result = self._conn.execute(f"SELECT COUNT(*) FROM \"{table_name}\"").fetchone()
+
+        # 确保关键字段始终是文本类型（防止 DuckDB 将纯数字科目编号识别为 INTEGER）
+        self._ensure_text_column(table_name, '科目编号')
+        self._ensure_text_column(table_name, '科目代码')
+
+        # 将数值列空值替换为 0
+        self._fill_null_numbers(table_name)
+
         return result[0]
 
     def import_xlsx(self, xlsx_path: str, table_name: str,
@@ -150,6 +158,9 @@ class DuckDBEngine:
             kwargs['header'] = header_row
         df = pd.read_excel(xlsx_path, **kwargs)
 
+        # 清洗列名：去除首尾空格，避免 Excel 中 "账户 " 之类的尾部空格导致映射失败
+        df.columns = [str(c).strip() for c in df.columns]
+
         # 添加常量列（如手动填写的公司名）
         if constant_columns:
             for col_name, col_value in constant_columns.items():
@@ -177,6 +188,14 @@ class DuckDBEngine:
         self._conn.execute(f'CREATE TABLE "{table_name}" AS SELECT * FROM df')
         result = self._conn.execute(f"SELECT COUNT(*) FROM \"{table_name}\"").fetchone()
         print(f"[DUCKDB IMPORT_XLSX] 表 {table_name} 创建完成, {result[0]} 行")
+
+        # 确保关键字段始终是文本类型
+        self._ensure_text_column(table_name, '科目编号')
+        self._ensure_text_column(table_name, '科目代码')
+
+        # 将数值列空值替换为 0
+        self._fill_null_numbers(table_name)
+
         return result[0]
 
     def execute(self, sql: str) -> Dict[str, Any]:
@@ -303,6 +322,34 @@ class DuckDBEngine:
         ).fetchall()
         return [{'name': row[0], 'type': row[1]} for row in result]
 
+    def _fill_null_numbers(self, table_name: str):
+        """将数值列的空值替换为 0，避免空值导致 SUM/CAST 失败"""
+        try:
+            schema = self.get_schema(table_name)
+            number_cols = [c['name'] for c in schema if any(t in c['type'].upper() for t in ['INT', 'DOUBLE', 'FLOAT', 'DECIMAL', 'BIGINT', 'SMALLINT'])]
+            if number_cols:
+                set_parts = [f'"{c}" = COALESCE("{c}", 0)' for c in number_cols]
+                self._conn.execute(f'UPDATE "{table_name}" SET {", ".join(set_parts)}')
+                print(f"[DUCKDB] 已填充 {table_name} 的 {len(number_cols)} 个数值列的空值为 0")
+        except Exception as e:
+            print(f"[DUCKDB] 数值列空值填充失败 ({table_name}): {e}")
+
+    def _ensure_text_column(self, table_name: str, col_name: str):
+        """确保指定列是文本类型（VARCHAR），避免 DuckDB 将纯数字识别为 INTEGER 导致查询问题"""
+        try:
+            schema = self.get_schema(table_name)
+            for col in schema:
+                if col['name'] == col_name:
+                    col_type = col['type'].upper()
+                    if 'INT' in col_type or 'BIGINT' in col_type or 'SMALLINT' in col_type:
+                        self._conn.execute(f'''
+                            ALTER TABLE "{table_name}" ALTER COLUMN "{col_name}" TYPE VARCHAR
+                        ''')
+                        print(f"[DUCKDB] 已将 {table_name}.{col_name} 从 {col_type} 转为 VARCHAR")
+                    return
+        except Exception as e:
+            print(f"[DUCKDB] {table_name}.{col_name} 类型检查跳过: {e}")
+
     def get_total_rows(self, table_name: str) -> int:
         """获取表总行数"""
         result = self._conn.execute(
@@ -413,3 +460,16 @@ class DuckDBEngine:
             if first_word not in ('SELECT', 'WITH', 'EXPLAIN', 'DESCRIBE', 'SHOW'):
                 return False
         return True
+
+
+def _read_csv_with_encoding(csv_path: str, **kwargs) -> 'pd.DataFrame':
+    """尝试多种编码读取 CSV，避免 UTF-8 解码失败"""
+    csv_encodings = ['utf-8-sig', 'utf-8', 'gbk', 'gb2312', 'latin1', 'cp1252']
+    last_error = None
+    for enc in csv_encodings:
+        try:
+            return pd.read_csv(csv_path, encoding=enc, **kwargs)
+        except (UnicodeDecodeError, UnicodeError) as e:
+            last_error = e
+            continue
+    raise last_error or Exception(f"无法解码 CSV 文件: {csv_path}")

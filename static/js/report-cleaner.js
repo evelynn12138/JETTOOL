@@ -137,6 +137,8 @@
         cardReconcile.style.display = 'none';
         cardUpload.style.display = 'block';
         configArea.style.display = 'none';
+        fileInfo.style.display = 'none';
+        fileInput.value = '';
         hideError(uploadError);
         hideError(detectionError);
         hideError(extractError);

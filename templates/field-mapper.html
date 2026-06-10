@@ -337,14 +337,15 @@
             { id: 'summary', name: '摘要', description: '交易内容摘要', type: 'text', required: true },
             { id: 'account_code', name: '科目编号', description: '会计科目编号', type: 'text', required: true },
             { id: 'subject', name: '科目名称', description: '会计科目名称', type: 'text', required: true },
-            { id: 'company', name: '公司名', description: '公司名称', type: 'text', required: false },
+            { id: 'company', name: '公司名', description: '公司名称', type: 'text', required: true },
             { id: 'debit', name: '借方', description: '借方金额', type: 'number', required: false },
             { id: 'credit', name: '贷方', description: '贷方金额', type: 'number', required: false },
             { id: 'amount', name: '金额', description: '交易发生额（有借贷方时自动计算）', type: 'number', required: false },
             { id: 'voucher_no', name: '凭证号', description: '凭证编号', type: 'text', required: true },
             { id: 'department', name: '部门', description: '所属部门', type: 'text', required: false },
             { id: 'person', name: '制单人', description: '制单人员', type: 'text', required: false },
-            { id: 'direction', name: '方向', description: '借贷方向（影响完整性测试金额正负）', type: 'text', required: false }
+            { id: 'direction', name: '方向', description: '借贷方向（影响完整性测试金额正负）', type: 'text', required: false },
+            { id: 'currency', name: '币种', description: '交易币种（多币种筛选时使用）', type: 'text', required: false }
         ];
 
         // ===== 科目余额表字段定义（含格式分组） =====
@@ -358,6 +359,7 @@
             { id: 'ending', name: '期末余额', description: '期末余额', type: 'number', required: true, format: 'calculated' },
             { id: 'beginning_direction', name: '期初余额方向', description: '期初余额借贷方向（已有余额时影响方向调整）', type: 'text', required: false, format: 'calculated' },
             { id: 'ending_direction', name: '期末余额方向', description: '期末余额借贷方向（已有余额时影响方向调整）', type: 'text', required: false, format: 'calculated' },
+            { id: 'currency', name: '币种', description: '科目余额表币种（多币种筛选时使用）', type: 'text', required: false, format: 'all' },
             // 模式B：借贷方计算
             { id: 'beginning_debit', name: '期初借方', description: '期初借方余额', type: 'number', required: true, format: 'debit_credit' },
             { id: 'beginning_credit', name: '期初贷方', description: '期初贷方余额', type: 'number', required: true, format: 'debit_credit' },
@@ -430,7 +432,8 @@
                 '凭证号': ['凭证号', 'voucher', '单据号', '编号', '凭证编号', 'voucher no'],
                 '部门': ['部门', 'department', '单位', '机构'],
                 '人员': ['人员', 'person', '员工', '姓名', '经办人', '制单人'],
-                '方向': ['方向', '方向', '借贷方向', 'debit/credit', 'dc', '借贷']
+                '方向': ['方向', '方向', '借贷方向', 'debit/credit', 'dc', '借贷'],
+                '币种': ['币别', '币种', '货币', 'currency', 'RMB', '人民币', 'USD', '美元', '币']
             };
 
             standardFields.forEach(stdField => {
@@ -490,7 +493,8 @@
                 '期末贷方': ['期末贷方', '期末贷', 'ending credit', 'final credit'],
                 '期末余额': ['期末余额', '期末', 'ending', '期末金额', 'final balance'],
                 '期初余额方向': ['期初方向', '期初余额方向', '期初借贷方向', 'beginning direction'],
-                '期末余额方向': ['期末方向', '期末余额方向', '期末借贷方向', 'ending direction']
+                '期末余额方向': ['期末方向', '期末余额方向', '期末借贷方向', 'ending direction'],
+                '币种': ['币别', '币种', '货币', 'currency', 'RMB', '人民币', 'USD', '美元', '币']
             };
 
             getBalanceFields().forEach(stdField => {
@@ -570,14 +574,15 @@
 
                 selectHtml += '</select>';
 
-                // 公司名字段：如果下拉没选源字段，显示手动输入框
+                // 公司名/币种字段：如果下拉没选源字段，显示手动输入框
                 let companyManualHtml = '';
-                if (stdField.name === '公司名') {
+                if (stdField.name === '公司名' || stdField.name === '币种') {
                     const isMapped = recMapping[stdField.id] && recMapping[stdField.id].length > 0;
+                    const placeholder = stdField.name === '公司名' ? '原文件无公司名时，在此手动输入...' : '原文件无币种列时，在此手动输入...';
                     companyManualHtml = `
                         <div class="company-manual-wrapper" style="margin-top:${isMapped ? '0' : '6'}px;">
                             <input type="text" class="company-manual" style="display:${isMapped ? 'none' : 'inline-block'};"
-                                   placeholder="原文件无公司名时，在此手动输入..." value="">
+                                   placeholder="${placeholder}" value="">
                         </div>
                     `;
                 }
@@ -601,9 +606,9 @@
 
             document.querySelectorAll(`#${tableBodyId} .field-select`).forEach(select => {
                 select.addEventListener('change', updateSampleValue);
-                // 公司名字段：联动手动输入框显隐
+                // 公司名/币种字段：联动手动输入框显隐
                 const stdId = select.dataset.stdField;
-                if (stdId === 'company') {
+                if (stdId === 'company' || stdId === 'currency') {
                     select.addEventListener('change', function() {
                         const wrapper = this.closest('td').querySelector('.company-manual-wrapper');
                         const input = wrapper ? wrapper.querySelector('.company-manual') : null;

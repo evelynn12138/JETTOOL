@@ -58,15 +58,22 @@ class DataProcessor:
             wb.close()
             return result
         else:
-            # CSV — 当作单个 sheet 处理
+            # CSV — 当作单个 sheet 处理（尝试常见编码）
             import csv
-            with open(filepath, 'r', encoding='utf-8-sig') as f:
-                reader = csv.reader(f)
-                rows = []
-                for i, row in enumerate(reader):
-                    if i >= nrows:
-                        break
-                    rows.append(row)
+            csv_encodings = ['utf-8-sig', 'utf-8', 'gbk', 'gb2312', 'latin1']
+            rows = []
+            for enc in csv_encodings:
+                try:
+                    with open(filepath, 'r', encoding=enc) as f:
+                        reader = csv.reader(f)
+                        for i, row in enumerate(reader):
+                            if i >= nrows:
+                                break
+                            rows.append(row)
+                    break
+                except (UnicodeDecodeError, UnicodeError):
+                    rows = []
+                    continue
             max_cols = max(len(r) for r in rows) if rows else 0
             return {'__csv__': {
                 'rows': rows,

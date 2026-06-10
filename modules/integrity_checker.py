@@ -108,28 +108,25 @@ SQL_EXPORT_CROSS = """
         SELECT
             "公司名",
             CAST("科目编号" AS VARCHAR) AS "科目编号",
-            "科目名称",
             CAST(SUM(CAST("金额" AS DOUBLE)) AS DOUBLE) AS "序时账发生额"
         FROM "{journal_table}"
         WHERE "凭证号" IS NOT NULL
           AND CAST("凭证号" AS VARCHAR) != ''
-        GROUP BY "公司名", "科目编号", "科目名称"
+        GROUP BY "公司名", "科目编号"
     ),
     balance_agg AS (
         SELECT
             "公司名",
             CAST("科目编号" AS VARCHAR) AS "科目编号",
-            "科目名称",
             CAST(SUM(CAST("期末余额" AS DOUBLE)) - SUM(CAST("期初余额" AS DOUBLE)) AS DOUBLE) AS "科目余额表发生额",
             CAST(SUM(CAST("期末余额" AS DOUBLE)) AS DOUBLE) AS "科目余额表期末",
             CAST(SUM(CAST("期初余额" AS DOUBLE)) AS DOUBLE) AS "科目余额表期初"
         FROM "{balance_table}"
-        GROUP BY "公司名", "科目编号", "科目名称"
+        GROUP BY "公司名", "科目编号"
     )
     SELECT
         COALESCE(CAST(j."公司名" AS VARCHAR), CAST(b."公司名" AS VARCHAR)) AS "公司名",
         COALESCE(CAST(j."科目编号" AS VARCHAR), CAST(b."科目编号" AS VARCHAR)) AS "科目编号",
-        COALESCE(CAST(j."科目名称" AS VARCHAR), CAST(b."科目名称" AS VARCHAR)) AS "科目名称",
         COALESCE(CAST(b."科目余额表期初" AS DOUBLE), 0.0) AS "科目余额表期初",
         COALESCE(CAST(b."科目余额表期末" AS DOUBLE), 0.0) AS "科目余额表期末",
         COALESCE(CAST(b."科目余额表发生额" AS DOUBLE), 0.0) AS "科目余额表发生额",
@@ -139,8 +136,7 @@ SQL_EXPORT_CROSS = """
     FULL OUTER JOIN balance_agg b
         ON  CAST(j."公司名" AS VARCHAR)   = CAST(b."公司名" AS VARCHAR)
         AND CAST(j."科目编号" AS VARCHAR) = CAST(b."科目编号" AS VARCHAR)
-        AND CAST(j."科目名称" AS VARCHAR) = CAST(b."科目名称" AS VARCHAR)
-    ORDER BY ABS("差异") DESC
+    ORDER BY CAST(COALESCE(CAST(j."科目编号" AS VARCHAR), CAST(b."科目编号" AS VARCHAR)) AS VARCHAR) ASC
 """
 
 
@@ -601,7 +597,7 @@ class IntegrityChecker:
             print(f"[CROSS EXPORT] b_table={b_table}, b_cols={b_cols}")
 
             j_required = {'公司名', '科目编号', '金额'}
-            b_required = {'公司名', '科目编号', '科目名称', '期初余额', '期末余额'}
+            b_required = {'公司名', '科目编号', '期初余额', '期末余额'}
             missing_j = j_required - j_cols
             missing_b = b_required - b_cols
             if missing_j or missing_b:
@@ -838,7 +834,7 @@ class IntegrityChecker:
     def test_cross_validation(self) -> Dict[str, Any]:
         result = {
             'test_name': '序时账&科目余额表交叉验证',
-            'description': '按公司+科目编号+科目名称汇总，检查两表发生额一致性',
+            'description': '按公司+科目编号汇总，检查两表发生额一致性',
             'status': 'skipped',
             'details': {}
         }
@@ -856,8 +852,8 @@ class IntegrityChecker:
         j_schema = self._get_schema(self.journal_table)
         b_schema = self._get_schema(self.balance_table)
 
-        j_required = {'公司名', '科目编号', '科目名称', '金额'}
-        b_required = {'公司名', '科目编号', '科目名称', '期初余额', '期末余额'}
+        j_required = {'公司名', '科目编号', '金额'}
+        b_required = {'公司名', '科目编号', '期初余额', '期末余额'}
 
         j_missing = j_required - j_schema
         b_missing = b_required - b_schema
@@ -883,28 +879,25 @@ class IntegrityChecker:
                     SELECT
                         "公司名",
                         CAST("科目编号" AS VARCHAR) AS "科目编号",
-                        "科目名称",
                         CAST(SUM(CAST("金额" AS DOUBLE)) AS DOUBLE) AS "序时账发生额"
                     FROM "{self.journal_table}"
                     WHERE "凭证号" IS NOT NULL
                       AND CAST("凭证号" AS VARCHAR) != ''
-                    GROUP BY "公司名", "科目编号", "科目名称"
+                    GROUP BY "公司名", "科目编号"
                 ),
                 balance_agg AS (
                     SELECT
                         "公司名",
                         CAST("科目编号" AS VARCHAR) AS "科目编号",
-                        "科目名称",
                         CAST(
                             SUM(CAST("期末余额" AS DOUBLE)) - SUM(CAST("期初余额" AS DOUBLE))
                         AS DOUBLE) AS "余额表发生额"
                     FROM "{self.balance_table}"
-                    GROUP BY "公司名", "科目编号", "科目名称"
+                    GROUP BY "公司名", "科目编号"
                 )
                 SELECT
                     COALESCE(CAST(j."公司名" AS VARCHAR), CAST(b."公司名" AS VARCHAR)) AS "公司名",
                     COALESCE(CAST(j."科目编号" AS VARCHAR), CAST(b."科目编号" AS VARCHAR)) AS "科目编号",
-                    COALESCE(CAST(j."科目名称" AS VARCHAR), CAST(b."科目名称" AS VARCHAR)) AS "科目名称",
                     COALESCE(CAST(j."序时账发生额" AS DOUBLE), 0.0) AS "序时账发生额",
                     COALESCE(CAST(b."余额表发生额" AS DOUBLE), 0.0) AS "余额表发生额",
                     COALESCE(CAST(j."序时账发生额" AS DOUBLE), 0.0) - COALESCE(CAST(b."余额表发生额" AS DOUBLE), 0.0) AS "差异"
@@ -912,7 +905,6 @@ class IntegrityChecker:
                 FULL OUTER JOIN balance_agg b
                     ON CAST(j."公司名" AS VARCHAR) = CAST(b."公司名" AS VARCHAR)
                     AND CAST(j."科目编号" AS VARCHAR) = CAST(b."科目编号" AS VARCHAR)
-                    AND CAST(j."科目名称" AS VARCHAR) = CAST(b."科目名称" AS VARCHAR)
                 ORDER BY ABS("差异") DESC
             '''
 
@@ -930,9 +922,9 @@ class IntegrityChecker:
             balance_total = 0.0
 
             for r in rows:
-                j_amount = r[3] or 0.0
-                b_amount = r[4] or 0.0
-                diff_amount = r[5] or 0.0
+                j_amount = r[2] or 0.0
+                b_amount = r[3] or 0.0
+                diff_amount = r[4] or 0.0
                 journal_total += j_amount
                 balance_total += b_amount
 
@@ -1100,3 +1092,193 @@ class IntegrityChecker:
             output['leaf_accounts_info'] = leaf_info
 
         return output
+
+    # ══════════════════════════════════════════════════════════
+    #  数据特征建议（辅助用户决策）
+    # ══════════════════════════════════════════════════════════
+
+    def get_suggestions(self, has_direction_field: bool = False) -> list:
+        """
+        分析已导入的数据特征，生成处理建议列表。
+        每条建议：{step, field, type, message, confidence, detail}
+
+        Args:
+            has_direction_field: 用户是否在字段映射中配置了「方向」字段
+        """
+        suggestions = []
+
+        if not self.engine:
+            return suggestions
+
+        # ── 工具：检查列是否存在 ──
+        def _has_col(table, col):
+            try:
+                return col in self._get_schema(table)
+            except Exception:
+                return False
+
+        # ── Step 1: 预处理 ──
+        jt = 'data'
+        bt = 'balance_data' if self._table_exists('balance_data') else None
+
+        if self._table_exists(jt):
+            j_schema = self._get_schema(jt)
+            total_rows = self._fetchone(f'SELECT COUNT(*) FROM "{jt}"')[0] or 1
+
+            # ── 工具：检测空值字段并生成填充建议 ──
+            def _check_fill(col_name, field_id, label, threshold_pct=5.0):
+                if col_name not in j_schema:
+                    return
+                empty = self._fetchone(
+                    f'SELECT COUNT(*) FROM "{jt}" WHERE "{col_name}" IS NULL OR CAST("{col_name}" AS VARCHAR) = \'\''
+                )
+                count = empty[0] if empty else 0
+                if count == 0:
+                    return
+                pct = round(count / total_rows * 100, 1)
+                if pct < threshold_pct:
+                    return  # 空行比例低于阈值，不提示
+
+                # 检查空行中是否包含合计关键词（说明是合计行而非需填充的空值）
+                summary_fields = [c for c in j_schema if c in ('摘要', '科目名称', '科目编号')]
+                is_summary = False
+                if summary_fields:
+                    kw_checks = ' OR '.join(
+                        f'CAST("{sf}" AS VARCHAR) LIKE \'%合计%\' OR CAST("{sf}" AS VARCHAR) LIKE \'%小计%\' OR CAST("{sf}" AS VARCHAR) LIKE \'%总计%\''
+                        for sf in summary_fields
+                    )
+                    summary_count = self._fetchone(
+                        f'SELECT COUNT(*) FROM "{jt}" WHERE ("{col_name}" IS NULL OR CAST("{col_name}" AS VARCHAR) = \'\') AND ({kw_checks})'
+                    )
+                    is_summary = summary_count and summary_count[0] > 0
+
+                msg = f'{label}有 {count} 行为空（占 {pct}%），建议开启向下填充'
+                if is_summary:
+                    msg += f'；其中 {summary_count[0]} 行含"合计"/"小计"关键词，也建议在剔除规则中启用剔除合计行'
+                suggestions.append({
+                    'step': 1, 'field': field_id,
+                    'type': 'recommend', 'confidence': 'high' if pct >= 10 else 'medium',
+                    'message': msg
+                })
+
+            _check_fill('凭证号', 'fill-voucher-no', '凭证号')
+            _check_fill('日期', 'fill-date', '日期')
+            _check_fill('制单人', 'fill-person', '制单人', threshold_pct=10.0)
+
+            # 反结转检测：科目编号=4103
+            if '科目编号' in j_schema and '摘要' in j_schema:
+                cf_code_count = self._fetchone(
+                    f'SELECT COUNT(*) FROM "{jt}" WHERE CAST("科目编号" AS VARCHAR) = \'4103\''
+                )
+                cf_kw_count = self._fetchone(
+                    f'SELECT COUNT(*) FROM "{jt}" WHERE "摘要" LIKE \'%结转%\' AND "摘要" LIKE \'%损益%\''
+                )
+                if (cf_code_count and cf_code_count[0] > 0) or (cf_kw_count and cf_kw_count[0] > 0):
+                    detail_parts = []
+                    if cf_code_count and cf_code_count[0] > 0:
+                        detail_parts.append(f'科目4103出现 {cf_code_count[0]} 次')
+                    if cf_kw_count and cf_kw_count[0] > 0:
+                        detail_parts.append(f'摘要含"结转""损益"共 {cf_kw_count[0]} 条')
+                    suggestions.append({
+                        'step': 3, 'field': 'reverse-cf-checkbox',
+                        'type': 'recommend', 'confidence': 'high',
+                        'message': f'检测到结转损益凭证迹象（{"；".join(detail_parts)}），建议启用反结转'
+                    })
+
+            # 借正贷负方向调整建议
+            if '金额' in j_schema:
+                # 检查金额是否全为正值（无负号），此时可能需要方向调整
+                all_positive = self._fetchone(
+                    f'SELECT COUNT(*) FROM "{jt}" WHERE CAST("金额" AS DOUBLE) < 0'
+                )
+                no_negative = all_positive and all_positive[0] == 0
+                if has_direction_field:
+                    suggestions.append({
+                        'step': 2, 'field': 'direction-adjust-checkbox',
+                        'type': 'recommend', 'confidence': 'high',
+                        'message': '已在字段映射中配置「方向」字段，建议启用借正贷负方向调整（借方为正、贷方为负）'
+                    })
+                elif no_negative:
+                    suggestions.append({
+                        'step': 2, 'field': 'direction-adjust-checkbox',
+                        'type': 'suggest', 'confidence': 'medium',
+                        'message': '序时账金额均为正数（无负值），可能存在借贷方向未标识的情况，可考虑启用方向调整'
+                    })
+
+        # ── 科目余额表检测 ──
+        if bt:
+            b_schema = self._get_schema(bt)
+
+            # 剔除合计行检测
+            if '科目名称' in b_schema:
+                total_count = self._fetchone(f'SELECT COUNT(*) FROM "{bt}" WHERE "科目名称" LIKE \'%合计%\'')
+                if total_count and total_count[0] > 0:
+                    suggestions.append({
+                        'step': 1, 'field': 'exclude-balance-total',
+                        'type': 'recommend', 'confidence': 'high',
+                        'message': f'科目余额表有 {total_count[0]} 行含"合计"，建议开启剔除'
+                    })
+
+            # 末级科目检测：用跟末级科目清洗相同的算法（排序后判断前缀关系）
+            if '科目编号' in b_schema:
+                has_company = '公司名' in b_schema
+                partition_by = 'PARTITION BY "公司名"' if has_company else ''
+                non_leaf = self._fetchone(f'''
+                    SELECT COUNT(*) FROM (
+                        SELECT CAST("科目编号" AS VARCHAR) AS code,
+                               LEAD(CAST("科目编号" AS VARCHAR)) OVER ({partition_by} ORDER BY CAST("科目编号" AS VARCHAR) ASC) AS next_code
+                        FROM "{bt}"
+                        WHERE "科目编号" IS NOT NULL
+                          AND CAST("科目编号" AS VARCHAR) != ''
+                          AND CAST("科目编号" AS VARCHAR) NOT LIKE '%计%'
+                    ) sub
+                    WHERE next_code IS NOT NULL
+                      AND CAST(code AS VARCHAR) = SUBSTR(CAST(next_code AS VARCHAR), 1, LENGTH(CAST(code AS VARCHAR)))
+                ''')
+                if non_leaf and non_leaf[0] and non_leaf[0] > 0:
+                    suggestions.append({
+                        'step': 3, 'field': 'leaf-accounts-checkbox',
+                        'type': 'suggest', 'confidence': 'high',
+                        'message': f'检测到 {non_leaf[0]} 个非末级科目（编码是下级的前缀），建议开启末级科目筛选'
+                    })
+
+            # 反结转检测2：科目余额表 5xxx/6xxx 科目期末余额是否归零
+            if '科目编号' in b_schema and '期末余额' in b_schema:
+                try:
+                    bal_zero = self._fetchone(f'''
+                        SELECT
+                            ROUND(COALESCE(SUM(CASE WHEN CAST("科目编号" AS VARCHAR) LIKE '5%' THEN CAST("期末余额" AS DOUBLE) END), 0), 2) AS cost_balance,
+                            ROUND(COALESCE(SUM(CASE WHEN CAST("科目编号" AS VARCHAR) LIKE '6%' THEN CAST("期末余额" AS DOUBLE) END), 0), 2) AS pl_balance
+                        FROM "{bt}"
+                    ''')
+                    if bal_zero:
+                        cost_bal = abs(bal_zero[0] or 0)
+                        pl_bal = abs(bal_zero[1] or 0)
+                        if cost_bal < 0.01 and pl_bal < 0.01:
+                            suggestions.append({
+                                'step': 3, 'field': 'reverse-cf-checkbox',
+                                'type': 'recommend', 'confidence': 'high',
+                                'message': '科目余额表中 5xxx（成本类）和 6xxx（损益类）科目期末余额均为 0，表明已做结转，建议启用反结转'
+                            })
+                except Exception:
+                    pass
+
+            # 多币种检测（仅检查科目余额表）
+            if bt and '币种' in b_schema:
+                currencies_count = self._fetchone(
+                    f'SELECT COUNT(DISTINCT "币种") FROM "{bt}" '
+                    f'WHERE "币种" IS NOT NULL AND CAST("币种" AS VARCHAR) != \'\''
+                )
+                if currencies_count and currencies_count[0] and currencies_count[0] >= 2:
+                    cur_rows = self._fetchall(
+                        f'SELECT DISTINCT CAST("币种" AS VARCHAR) FROM "{bt}" '
+                        f'WHERE "币种" IS NOT NULL AND CAST("币种" AS VARCHAR) != \'\' LIMIT 5'
+                    )
+                    cur_names = ', '.join(r[0] for r in cur_rows)
+                    suggestions.append({
+                        'step': 1, 'field': 'currency-filter',
+                        'type': 'suggest', 'confidence': 'medium',
+                        'message': f'科目余额表检测到 {currencies_count[0]} 种币种（{cur_names}），如需单一币种核对可在字段映射中配置'
+                    })
+
+        return suggestions

@@ -85,117 +85,262 @@
                 </button>
             </div>
 
-            <!-- 高级设置：反结转 + 末级科目 -->
-            <div class="config-card" style="margin-bottom: 24px;">
-                <div class="config-header">
-                    <h3><i class="fas fa-exchange-alt"></i> 高级设置</h3>
-                    <p class="config-description">
-                        根据您的数据特点选择合适的处理模式，系统将自动应用后再执行完整性测试。
+            <!-- 💡 智能建议 -->
+            {% if suggestions %}
+            <div style="margin-bottom:16px;">
+                {% set step_labels = ['', '预处理', '金额处理', '特殊调整', '运行检查'] %}
+                {% for sug in suggestions %}
+                <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 14px;margin-bottom:6px;display:flex;align-items:flex-start;gap:10px;font-size:13px;">
+                    {% if sug.confidence == 'high' %}
+                    <span style="background:#0284c7;color:white;border-radius:4px;padding:1px 8px;font-size:11px;font-weight:600;white-space:nowrap;margin-top:1px;">建议</span>
+                    {% elif sug.confidence == 'medium' %}
+                    <span style="background:#7c3aed;color:white;border-radius:4px;padding:1px 8px;font-size:11px;font-weight:600;white-space:nowrap;margin-top:1px;">提示</span>
+                    {% else %}
+                    <span style="background:#9ca3af;color:white;border-radius:4px;padding:1px 8px;font-size:11px;font-weight:600;white-space:nowrap;margin-top:1px;">参考</span>
+                    {% endif %}
+                    <div style="flex:1;">
+                        <span style="font-weight:500;color:#0c4a6e;">[{{ step_labels[sug.step] }}] </span>
+                        {{ sug.message }}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <!-- ═══ 4步引导流程 ═══ -->
+            <div class="step-wizard" id="step-wizard">
+                <div class="sw-step sw-active" data-step="1" onclick="goToStep(1)">
+                    <span class="sw-num">1</span> 预处理
+                </div>
+                <div class="sw-connector"></div>
+                <div class="sw-step" data-step="2" onclick="goToStep(2)">
+                    <span class="sw-num">2</span> 金额处理
+                </div>
+                <div class="sw-connector"></div>
+                <div class="sw-step" data-step="3" onclick="goToStep(3)">
+                    <span class="sw-num">3</span> 特殊调整
+                </div>
+                <div class="sw-connector"></div>
+                <div class="sw-step" data-step="4" onclick="goToStep(4)">
+                    <span class="sw-num">4</span> 运行检查
+                </div>
+            </div>
+
+            <!-- ═══ Step 1: 预处理 ═══ -->
+            <div id="step-1" class="step-content step-content-active">
+                <div class="step-card">
+                    <h4><i class="fas fa-arrows-alt-v"></i> 向下填充缺失字段 <span class="auto-badge">先执行</span></h4>
+                    <p class="hint-text">ERP 导出序时账有时只在首行有凭证号、日期等字段，勾选后系统先按凭证号分组向下填充，再做后续剔除。</p>
+                    <div style="display:flex;flex-direction:column;gap:8px;padding:8px 0;">
+                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#555;cursor:pointer;">
+                            <input type="checkbox" id="fill-voucher-no" checked>
+                            向下填充<strong>凭证号</strong>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#555;cursor:pointer;">
+                            <input type="checkbox" id="fill-date" checked>
+                            向下填充<strong>日期</strong>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#555;cursor:pointer;">
+                            <input type="checkbox" id="fill-person">
+                            向下填充<strong>制单人</strong>
+                        </label>
+                    </div>
+                </div>
+                <div class="step-card">
+                    <h4><i class="fas fa-filter"></i> 数据清洗规则 <span class="auto-badge">后执行</span></h4>
+                    <p class="hint-text">字段填充完成后，再按以下规则剔除无效行。</p>
+                    <div style="display:flex;flex-direction:column;gap:12px;padding:12px 0;">
+                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#555;cursor:pointer;">
+                            <input type="checkbox" id="exclude-empty-voucher" checked>
+                            <strong>剔除凭证编号为空的行</strong>（通常为合计行或空行）
+                        </label>
+                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#555;cursor:pointer;">
+                            <input type="checkbox" id="exclude-balance-total" checked>
+                            <strong>剔除科目余额表含"合计"的行</strong>
+                        </label>
+                    </div>
+                </div>
+                <div class="step-card">
+                    <h4><i class="fas fa-money-bill-wave"></i> 多币种筛选</h4>
+                    {% set has_any_currency = has_currency_field or has_balance_currency %}
+                    {% if has_any_currency and currency_values %}
+                    <p class="hint-text">检测到数据中包含以下币种，可选择保留单一币种进行核对：</p>
+                    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;">
+                        <select id="currency-filter-select" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:5px;font-size:13px;min-width:120px;">
+                            <option value="">全部保留</option>
+                            {% for cv in currency_values %}
+                            <option value="{{ cv }}">{{ cv }}</option>
+                            {% endfor %}
+                        </select>
+                        <span style="font-size:12px;color:#6b7280;">（选择后仅保留该币种的数据）</span>
+                    </div>
+                    {% elif has_any_currency %}
+                    <p class="hint-text">✅ 已配置币种，数据中未检测到多币种情况，无需筛选。</p>
+                    {% else %}
+                    <p class="hint-text">
+                        ⚠️ 未检测到币种字段配置。如需多币种筛选，请在字段映射中映射「币种」列或手动输入币种值。
+                        如果原始数据已是单币种，无需配置，直接下一步即可。
                     </p>
+                    {% endif %}
                 </div>
+                <div class="step-actions">
+                    <div></div>
+                    <button class="btn btn-primary" onclick="goToStep(2)">下一步 <i class="fas fa-arrow-right"></i></button>
+                </div>
+            </div>
 
-                <div class="settings-section">
-                    <div class="reverse-cf-toggle">
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="reverse-cf-checkbox">
-                            <span class="toggle-slider"></span>
+            <!-- ═══ Step 2: 金额处理 ═══ -->
+            <div id="step-2" class="step-content" style="display:none;">
+                <div class="step-card">
+                    <h4><i class="fas fa-calculator"></i> 金额处理方式 <span class="auto-badge">自动检测</span></h4>
+                    <p class="hint-text">系统根据您在字段映射中的配置，已自动识别金额处理方式：</p>
+                    {% if amount_mode == 'direction_amount' %}
+                    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 18px;margin-bottom:12px;">
+                        <div style="font-weight:600;color:#166534;margin-bottom:6px;">✅ 方向 + 金额 → 借正贷负计算</div>
+                        <div style="font-size:13px;color:#374151;">
+                            检测到您已映射<strong>「方向」</strong>和<strong>「金额」</strong>字段。
+                            系统将按方向（借方为正、贷方为负）自动调整金额正负号。
+                            {% if has_direction_field %}
+                            <span style="color:#166534;font-weight:600;"> ✅ 已映射方向字段</span>
+                            {% else %}
+                            <span style="color:#dc2626;"> ⚠️ 未映射方向字段</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% elif amount_mode == 'debit_credit' %}
+                    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 18px;margin-bottom:12px;">
+                        <div style="font-weight:600;color:#166534;margin-bottom:6px;">✅ 借方 - 贷方 计算发生额</div>
+                        <div style="font-size:13px;color:#374151;">
+                            检测到您已映射<strong>「借方」</strong>和<strong>「贷方」</strong>字段。
+                            系统将自动计算发生额 = 借方金额 - 贷方金额。
+                        </div>
+                    </div>
+                    {% else %}
+                    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 18px;margin-bottom:12px;">
+                        <div style="font-weight:600;color:#166534;margin-bottom:6px;">✅ 直接使用发生额字段</div>
+                        <div style="font-size:13px;color:#374151;">
+                            检测到您已映射<strong>「金额」</strong>字段，系统将直接使用该字段的值。
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="step-card">
+                    <h4><i class="fas fa-exchange-alt"></i> 借正贷负方向调整 <span class="auto-badge">可选</span></h4>
+                    <p class="hint-text">
+                        开启后，序时账金额将按借贷方向调整正负号（借方为正、贷方为负）
+                        {% if has_direction_field %}
+                        <span style="color:#166534;font-weight:600;"> ✅ 方向字段已配置，可直接启用</span>
+                        {% else %}
+                        <span style="color:#dc2626;font-weight:600;"> ⚠️ 未检测到方向字段映射，如需此功能请在字段映射中配置「方向」字段</span>
+                        {% endif %}
+                    </p>
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 0;">
+                        <input type="checkbox" id="direction-adjust-checkbox" {% if has_direction_field %}checked{% endif %} style="width:18px;height:18px;">
+                        <span style="font-size:14px;font-weight:500;">启用借正贷负方向调整</span>
+                    </label>
+                </div>
+                <div class="step-actions">
+                    <button class="btn btn-secondary" onclick="goToStep(1)"><i class="fas fa-arrow-left"></i> 上一步</button>
+                    <button class="btn btn-primary" onclick="goToStep(3)">下一步 <i class="fas fa-arrow-right"></i></button>
+                </div>
+            </div>
+
+            <!-- ═══ Step 3: 特殊调整 ═══ -->
+            <div id="step-3" class="step-content" style="display:none;">
+                <div class="step-card">
+                    <h4><i class="fas fa-exchange-alt"></i> 反结转（剔除损益结转凭证）</h4>
+                    <p class="hint-text">启用后系统将先剔除结转损益凭证，再执行完整性测试。适用于金蝶/用友等系统。</p>
+                    <div style="display:flex;flex-direction:column;gap:12px;padding:8px 0;">
+                        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                            <input type="checkbox" id="reverse-cf-checkbox" style="width:18px;height:18px;">
+                            <span style="font-size:14px;font-weight:500;">启用反结转</span>
                         </label>
-                        <div class="toggle-label">
-                            <strong>启用反结转模式</strong>
-                            <p id="reverse-cf-hint">关闭时使用原始数据进行完整性测试（适用于 SAP 等无需反结转的系统）</p>
+                        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;padding:12px;background:#f8f9fa;border-radius:8px;">
+                            <div>
+                                <label style="font-size:12px;color:#666;display:block;margin-bottom:4px;">结转科目编号</label>
+                                <input type="text" id="cf-account-code" value="4103" style="width:160px;padding:7px 10px;border:1px solid #d1d5db;border-radius:5px;font-size:13px;">
+                                <p style="font-size:11px;color:#999;margin-top:2px;">默认 4103（本年利润），不确定请留空</p>
+                            </div>
+                            <div>
+                                <label style="font-size:12px;color:#666;display:block;margin-bottom:4px;">摘要关键词（逗号分隔）</label>
+                                <input type="text" id="cf-keywords" value="结转,损益" style="width:240px;padding:7px 10px;border:1px solid #d1d5db;border-radius:5px;font-size:13px;">
+                                <p style="font-size:11px;color:#999;margin-top:2px;">摘要同时含所有关键词才视为结转凭证</p>
+                            </div>
                         </div>
                     </div>
                 </div>
-
-                <div class="settings-section" style="border-top: 1px solid #e5e7eb; padding-top: 16px; margin-top: 16px;">
-                    <div class="reverse-cf-toggle">
-                        <label class="toggle-switch">
+                <div class="step-card">
+                    <h4><i class="fas fa-sitemap"></i> 科目余额表设置</h4>
+                    <div style="display:flex;flex-direction:column;gap:12px;padding:8px 0;">
+                        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
                             <input type="checkbox" id="leaf-accounts-checkbox">
-                            <span class="toggle-slider"></span>
-                        </label>
-                        <div class="toggle-label">
-                            <strong>仅使用末级科目</strong>
-                            <p id="leaf-accounts-hint">
-                                开启后，系统将从科目余额表中筛选末级科目（剔除空行、含"计"行、非末级科目），
-                                再执行完整性测试和交叉验证
-                            </p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 借正贷负方向调整 -->
-                <div class="settings-section" style="border-top: 1px solid #e5e7eb; padding-top: 16px; margin-top: 16px;">
-                    <div class="reverse-cf-toggle">
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="direction-adjust-checkbox" {% if has_direction_field %}checked{% endif %}>
-                            <span class="toggle-slider"></span>
-                        </label>
-                        <div class="toggle-label">
-                            <strong>借正贷负方向调整</strong>
-                            <p id="direction-adjust-hint">
-                                开启后，序时账金额将按借贷方向调整正负号（借方为正、贷方为负）
-                                {% if has_direction_field %}
-                                <span style="color:#166534;font-weight:600;">✅ 已映射方向字段</span>
-                                {% else %}
-                                <span style="color:#dc2626;font-weight:600;">⚠️ 未映射方向字段，需先在字段映射中配置</span>
-                                {% endif %}
-                            </p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 剔除规则 -->
-                <div class="settings-section" style="border-top: 1px solid #e5e7eb; padding-top: 16px; margin-top: 16px;">
-                    <div style="display:flex;flex-direction:column;gap:12px;padding:16px 20px;background:var(--light-gray);border-radius:8px;border:1px solid #e5e7eb;">
-                        <strong style="font-size:14px;color:#333;">剔除规则</strong>
-                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#555;cursor:pointer;">
-                            <input type="checkbox" id="exclude-empty-voucher">
-                            剔除序时账中<strong>凭证编号为空</strong>的记录
-                        </label>
-                        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#555;cursor:pointer;">
-                            <input type="checkbox" id="exclude-balance-total">
-                            剔除科目余额表中<strong>含"合计"</strong>的行
+                            <span style="font-size:13px;"><strong>仅使用末级科目</strong> — 从科目余额表中筛选末级科目后进行核对</span>
                         </label>
                     </div>
                 </div>
+                <div class="step-actions">
+                    <button class="btn btn-secondary" onclick="goToStep(2)"><i class="fas fa-arrow-left"></i> 上一步</button>
+                    <button class="btn btn-primary" onclick="goToStep(4)">下一步 <i class="fas fa-arrow-right"></i></button>
+                </div>
+            </div>
 
-                <!-- 反结转自定义配置（展开/折叠） -->
-                <div class="settings-section" style="border-top: 1px solid #e5e7eb; padding-top: 16px; margin-top: 16px;">
-                    <div style="display:flex;flex-direction:column;gap:12px;padding:16px 20px;background:var(--light-gray);border-radius:8px;border:1px solid #e5e7eb;">
-                        <div style="display:flex;align-items:center;gap:8px;cursor:pointer;" id="cf-advanced-toggle">
-                            <i class="fas fa-chevron-right" id="cf-advanced-icon" style="font-size:12px;color:var(--secondary-color);"></i>
-                            <strong style="font-size:14px;color:#333;">反结转高级参数 <span style="font-size:11px;color:var(--secondary-color);font-weight:400;">（仅反结转启用时生效）</span></strong>
-                        </div>
-                        <div id="cf-advanced-body" style="display:none;flex-direction:column;gap:12px;">
-                            <div>
-                                <label style="font-size:12px;color:#666;display:block;margin-bottom:4px;">未分配利润/本年利润科目号</label>
-                                <input type="text" id="cf-account-code" value="4103" style="width:200px;padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
-                                <p style="font-size:11px;color:#999;margin-top:2px;">留空使用默认值 4103</p>
+            <!-- ═══ Step 4: 运行检查 ═══ -->
+            <div id="step-4" class="step-content" style="display:none;">
+                <div class="step-card">
+                    <h4><i class="fas fa-check-circle"></i> 配置确认</h4>
+                    <div style="display:flex;flex-direction:column;gap:8px;padding:8px 0;">
+                        <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 16px;flex:1;min-width:150px;">
+                                <div style="font-size:11px;color:#166534;">预处理</div>
+                                <div style="font-size:14px;font-weight:600;color:#166534;" id="step4-pre-status">✅ 已配置</div>
                             </div>
-                            <div>
-                                <label style="font-size:12px;color:#666;display:block;margin-bottom:4px;">结转摘要关键词（逗号分隔）</label>
-                                <input type="text" id="cf-keywords" value="结转,损益" style="width:300px;padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
-                                <p style="font-size:11px;color:#999;margin-top:2px;">留空使用默认值：结转, 损益</p>
+                            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 16px;flex:1;min-width:150px;">
+                                <div style="font-size:11px;color:#166534;">金额处理</div>
+                                <div style="font-size:14px;font-weight:600;color:#166534;" id="step4-amount-status">✅ 已配置</div>
+                            </div>
+                            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 16px;flex:1;min-width:150px;">
+                                <div style="font-size:11px;color:#166534;">特殊调整</div>
+                                <div style="font-size:14px;font-weight:600;color:#166534;" id="step4-cf-status">未启用</div>
                             </div>
                         </div>
                     </div>
                 </div>
+                <div style="display:flex;gap:12px;margin-bottom:24px;">
+                    <button class="btn btn-primary" id="run-all-tests" style="font-size:16px;padding:12px 32px;">
+                        <i class="fas fa-play"></i> 运行全部三项检查
+                    </button>
+                    <button class="btn btn-secondary" id="skip-btn-bottom" onclick="window.location.href='/query'" style="font-size:14px;padding:8px 18px;">
+                        <i class="fas fa-forward"></i> 跳过，直接进入查询
+                    </button>
+                </div>
+                <div id="test-progress" style="display:none;margin-bottom:24px;"></div>
+                <div id="test-results" style="display:none;margin-bottom:24px;">
+                    <h3><i class="fas fa-chart-bar"></i> 测试结果</h3>
+                    <div style="display:flex;gap:8px;margin:12px 0;flex-wrap:wrap;">
+                        <button class="btn" id="ai-analyze-btn" style="background:var(--yellow);color:var(--black);border:none;">
+                            <i class="fas fa-robot"></i> AI 差异分析
+                        </button>
+                        <button class="btn btn-success" id="export-results-btn">
+                            <i class="fas fa-file-excel"></i> 导出为 Excel
+                        </button>
+                    </div>
+                    <div id="results-container">
+                        <div id="test-journal-result" class="test-result-card"></div>
+                        <div id="test-balance-result" class="test-result-card"></div>
+                        <div id="test-cross-result" class="test-result-card"></div>
+                    </div>
+                </div>
+                <div class="step-actions">
+                    <button class="btn btn-secondary" onclick="goToStep(3)"><i class="fas fa-arrow-left"></i> 上一步</button>
+                    <div></div>
+                </div>
             </div>
 
-            <!-- 结果区域 -->
-            <div class="test-results" id="test-results" style="display: none;">
-                <!-- 结果通过JavaScript动态渲染 -->
-            </div>
+            <!-- 结果区域（向后兼容） -->
+            <div class="test-results" id="test-results-old" style="display: none;"></div>
 
-            <!-- 底部按钮 -->
-            <div class="action-buttons">
-                <button class="btn btn-secondary" id="skip-btn">
-                    <i class="fas fa-forward"></i> 跳过，直接进入查询
-                </button>
-                <button class="btn btn-primary" id="run-tests-btn">
-                    <i class="fas fa-play"></i> 运行完整性测试
-                </button>
-            </div>
+            <!-- 底部操作按钮 -->
+            <div class="action-buttons" style="display:none;"></div>
 
             <div class="loading-overlay" id="loading-overlay" style="display: none;">
                 <div class="loading-content">
@@ -447,34 +592,72 @@
     </div>
 
     <script>
+        // ===== 步骤导航 =====
+        function goToStep(step) {
+            document.querySelectorAll('.sw-step').forEach(el => {
+                const s = parseInt(el.dataset.step);
+                el.classList.remove('sw-active', 'sw-done');
+                if (s === step) el.classList.add('sw-active');
+                else if (s < step) el.classList.add('sw-done');
+            });
+            document.querySelectorAll('.sw-connector').forEach((el, i) => {
+                el.classList.toggle('sw-done', i < step - 1);
+            });
+            for (let i = 1; i <= 4; i++) {
+                const content = document.getElementById('step-' + i);
+                if (content) {
+                    content.classList.toggle('step-content-active', i === step);
+                    content.style.display = i === step ? 'block' : 'none';
+                }
+            }
+            // 进入 Step 4 时实时读取前端状态刷新配置确认
+            if (step === 4) {
+                // 预处理：统计启用的清洗规则数
+                const preStatus = document.getElementById('step4-pre-status');
+                const excludeV = document.getElementById('exclude-empty-voucher');
+                const excludeB = document.getElementById('exclude-balance-total');
+                const fillV = document.getElementById('fill-voucher-no');
+                const fillD = document.getElementById('fill-date');
+                let enabledCount = 0;
+                [excludeV, excludeB, fillV, fillD].forEach(el => { if (el && el.checked) enabledCount++; });
+                if (preStatus) {
+                    preStatus.textContent = `✅ ${enabledCount} 项规则`;
+                    preStatus.style.color = '#166534';
+                }
+
+                // 金额处理：检测方向调整是否开启 + 模式
+                const amtStatus = document.getElementById('step4-amount-status');
+                const dirBox = document.getElementById('direction-adjust-checkbox');
+                if (amtStatus) {
+                    const mode = (dirBox && dirBox.checked) ? '借正贷负' : '{% if amount_mode == "debit_credit" %}借方-贷方{% elif amount_mode == "direct" %}直接发生额{% else %}已配置{% endif %}';
+                    amtStatus.textContent = `✅ ${mode}`;
+                    amtStatus.style.color = '#166534';
+                }
+
+                // 特殊调整：反结转 + 末级科目
+                const cfStatus = document.getElementById('step4-cf-status');
+                const cfBox = document.getElementById('reverse-cf-checkbox');
+                const leafBox = document.getElementById('leaf-accounts-checkbox');
+                if (cfStatus) {
+                    const parts = [];
+                    if (cfBox && cfBox.checked) parts.push('反结转');
+                    if (leafBox && leafBox.checked) parts.push('末级科目');
+                    if (parts.length > 0) {
+                        cfStatus.textContent = `✅ ${parts.join(' + ')}`;
+                        cfStatus.style.color = '#166534';
+                    } else {
+                        cfStatus.textContent = '未启用';
+                        cfStatus.style.color = '#6b7280';
+                    }
+                }
+            }
+        }
+
         const loadingOverlay = document.getElementById('loading-overlay');
         const loadingTitle = document.getElementById('loading-title');
         const loadingMessage = document.getElementById('loading-message');
         const cfCheckbox = document.getElementById('reverse-cf-checkbox');
-        const cfHint = document.getElementById('reverse-cf-hint');
         const leafCheckbox = document.getElementById('leaf-accounts-checkbox');
-        const leafHint = document.getElementById('leaf-accounts-hint');
-
-        // 反结转切换提示
-        cfCheckbox.addEventListener('change', function() {
-            if (this.checked) {
-                cfHint.innerHTML = '开启后，系统将：① 优先按科目编号4103识别结转损益凭证；'
-                    + '② 若无4103，按摘要同时含"结转"和"损益"识别；'
-                    + '③ 将结转损益金额从科目余额表期末余额中扣减；④ 使用调整后的数据执行三项测试。';
-            } else {
-                cfHint.innerHTML = '关闭时使用原始数据进行完整性测试（适用于 SAP 等无需反结转的系统）';
-            }
-        });
-
-        // 末级科目切换提示
-        leafCheckbox.addEventListener('change', function() {
-            if (this.checked) {
-                leafHint.innerHTML = '开启后，系统将：① 剔除科目编号为空的行；② 剔除科目编号含"计"的行（如合计、小计）；'
-                    + '③ 按公司+科目编号降序排列，保留末级科目（最细粒度的明细科目）；④ 使用筛选后的数据执行测试。';
-            } else {
-                leafHint.innerHTML = '关闭时使用科目余额表全部数据进行完整性测试';
-            }
-        });
 
         // 运行测试
         async function runTests() {
@@ -493,7 +676,11 @@
                         exclude_empty_voucher: document.getElementById('exclude-empty-voucher').checked,
                         exclude_balance_total: document.getElementById('exclude-balance-total').checked,
                         cf_account_code: document.getElementById('cf-account-code').value.trim() || '4103',
-                        cf_keywords: document.getElementById('cf-keywords').value.split(',').map(s => s.trim()).filter(Boolean) || ['结转', '损益']
+                        cf_keywords: document.getElementById('cf-keywords').value.split(',').map(s => s.trim()).filter(Boolean) || ['结转', '损益'],
+                        fill_voucher_no: document.getElementById('fill-voucher-no').checked,
+                        fill_date: document.getElementById('fill-date').checked,
+                        fill_person: document.getElementById('fill-person').checked,
+                        currency_filter: document.getElementById('currency-filter-select')?.value || ''
                     })
                 });
 
@@ -1004,7 +1191,8 @@
                         reverse_carry_forward: cfCheckbox.checked,
                         leaf_accounts: leafCheckbox.checked,
                         cf_account_code: document.getElementById('cf-account-code').value.trim() || '4103',
-                        cf_keywords: document.getElementById('cf-keywords').value.split(',').map(s => s.trim()).filter(Boolean) || ['结转', '损益']
+                        cf_keywords: document.getElementById('cf-keywords').value.split(',').map(s => s.trim()).filter(Boolean) || ['结转', '损益'],
+                        currency_filter: document.getElementById('currency-filter-select')?.value || ''
                     })
                 });
 
@@ -1038,23 +1226,23 @@
         }
 
         // 事件监听
-        document.getElementById('run-tests-btn').addEventListener('click', runTests);
+        document.getElementById('run-all-tests').addEventListener('click', runTests);
         document.getElementById('skip-btn').addEventListener('click', goToQuery);
 
         // 聊天面板保留但默认隐藏，用户可手动点击右下角按钮打开
-        document.addEventListener('DOMContentLoaded', () => {
-            // 不再自动触发聊天，保持面板关闭
-
-            // 反结转高级参数折叠/展开
-            const cfToggle = document.getElementById('cf-advanced-toggle');
-            const cfBody = document.getElementById('cf-advanced-body');
-            const cfIcon = document.getElementById('cf-advanced-icon');
-            if (cfToggle) {
-                cfToggle.addEventListener('click', () => {
-                    const isHidden = cfBody.style.display === 'none';
-                    cfBody.style.display = isHidden ? 'flex' : 'none';
-                    if (cfIcon) cfIcon.className = 'fas fa-chevron-' + (isHidden ? 'down' : 'right');
-                });
+        document.addEventListener('DOMContentLoaded', async () => {
+            // 恢复上次测试结果（从查询分析返回时保留）
+            try {
+                const res = await fetch('/api/integrity-test/results');
+                const data = await res.json();
+                if (data.success && !data.error && data.results) {
+                    if (typeof displayResults === 'function') {
+                        displayResults(data);
+                        goToStep(4);
+                    }
+                }
+            } catch (e) {
+                // 无缓存结果，正常显示第一步
             }
         });
     </script>
