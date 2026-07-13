@@ -179,6 +179,66 @@ class IntegrityChecker:
     def _fetchdf(self, sql: str) -> pd.DataFrame:
         return self.engine._conn.execute(sql).fetchdf()
 
+    # ========== 向下填充（处理凭证号/日期/制单人等空值） ==========
+
+    _fill_setup_done = False
+
+    def _fill_down(self, fill_voucher: bool = False, fill_date: bool = False,
+                   fill_person: bool = False):
+        """
+        按公司+日期排序，用 LAST_VALUE IGNORE NULLS 向下填充空值字段。
+        必须在 TRIM 之后、空值剔除之前执行，否则会误删需填充的行。
+
+        Args:
+            fill_voucher: 是否填充凭证号
+            fill_date: 是否填充日期
+            fill_person: 是否填充制单人
+        """
+        if self._fill_setup_done:
+            return
+        if not self._table_exists(self.journal_table):
+            return
+
+        schema = self._get_schema(self.journal_table)
+        jt = self.journal_table
+
+        for col_name in ['凭证号', '日期', '制单人']:
+            if col_name not in schema:
+                continue
+            should_fill = {'凭证号': fill_voucher, '日期': fill_date, '制单人': fill_person}.get(col_name, False)
+            if not should_fill:
+                continue
+
+            try:
+                # 先检查是否有空值需要填充
+                empty = self._fetchone(
+                    f'SELECT COUNT(*) FROM "{jt}" WHERE "{col_name}" IS NULL OR CAST("{col_name}" AS VARCHAR) = \'\''
+                )
+                if empty and empty[0] > 0:
+                    self.engine._conn.execute(f'''
+                        UPDATE "{jt}" AS t
+                        SET "{col_name}" = sub.filled
+                        FROM (
+                            SELECT rowid, LAST_VALUE("{col_name}" IGNORE NULLS) OVER (
+                                PARTITION BY "公司名"
+                                ORDER BY rowid
+                                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                            ) AS filled
+                            FROM "{jt}"
+                        ) sub
+                        WHERE t.rowid = sub.rowid
+                          AND (t."{col_name}" IS NULL OR CAST(t."{col_name}" AS VARCHAR) = '')
+                          AND sub.filled IS NOT NULL
+                    ''')
+                    filled = self._fetchone(
+                        f'SELECT COUNT(*) FROM "{jt}" WHERE "{col_name}" IS NOT NULL AND CAST("{col_name}" AS VARCHAR) != \'\''
+                    )
+                    print(f"[FILL DOWN] {col_name}: 已填充 {empty[0]} 行空值")
+            except Exception as e:
+                print(f"[FILL DOWN] {col_name} 填充失败: {e}")
+
+        self._fill_setup_done = True
+
     # ========== TRIM 视图（去空格） ==========
 
     def _drop_trim_views(self):
@@ -623,7 +683,10 @@ class IntegrityChecker:
     def export_report(self, reverse_carry_forward: bool = False,
                       leaf_accounts: bool = False,
                       cf_account_code: str = '4103',
-                      cf_keywords: list = None) -> dict:
+                      cf_keywords: list = None,
+                      fill_voucher_no: bool = False,
+                      fill_date: bool = False,
+                      fill_person: bool = False) -> dict:
         """
         生成三个 Sheet 的导出数据。
 
@@ -632,6 +695,9 @@ class IntegrityChecker:
             leaf_accounts: 是否仅用末级科目
             cf_account_code: 反结转科目编号（默认 4103）
             cf_keywords: 反结转摘要关键词列表（默认 ["结转", "损益"]）
+            fill_voucher_no: 是否向下填充凭证号空值
+            fill_date: 是否向下填充日期空值
+            fill_person: 是否向下填充制单人空值
 
         Returns:
             {
@@ -652,6 +718,9 @@ class IntegrityChecker:
 
         # 0. TRIM 文本列去空格（最先执行）
         self._setup_trim_views()
+
+        # 0.5 向下填充（在方向调整和空值剔除之前）
+        self._fill_down(fill_voucher=fill_voucher_no, fill_date=fill_date, fill_person=fill_person)
 
         # 1. 方向调整
         self._setup_direction_views()
@@ -986,7 +1055,10 @@ class IntegrityChecker:
                 leaf_accounts: bool = False,
                 balance_snapshot_table: str = None,
                 cf_account_code: str = '4103',
-                cf_keywords: list = None) -> Dict[str, Any]:
+                cf_keywords: list = None,
+                fill_voucher_no: bool = False,
+                fill_date: bool = False,
+                fill_person: bool = False) -> Dict[str, Any]:
         """
         运行全部完整性测试。
 
@@ -996,6 +1068,9 @@ class IntegrityChecker:
             balance_snapshot_table: 非空时，在清理前将最终科目余额表快照到该表名
             cf_account_code: 反结转科目编号（默认 4103）
             cf_keywords: 反结转摘要关键词列表（默认 ["结转", "损益"]）
+            fill_voucher_no: 是否向下填充凭证号空值
+            fill_date: 是否向下填充日期空值
+            fill_person: 是否向下填充制单人空值
         """
         orig_jt = self.journal_table
         orig_bt = self.balance_table
@@ -1004,6 +1079,9 @@ class IntegrityChecker:
 
         # 0. TRIM 文本列去空格（最先执行）
         self._setup_trim_views()
+
+        # 0.5 向下填充（在方向调整之前，在空值剔除之前）
+        self._fill_down(fill_voucher=fill_voucher_no, fill_date=fill_date, fill_person=fill_person)
 
         # 1. 方向调整
         self._setup_direction_views()

@@ -136,7 +136,8 @@ class DuckDBEngine:
                     rename_mapping: Optional[Dict[str, str]] = None,
                     sheet_name: Optional[str] = None,
                     header_row: Optional[int] = None,
-                    constant_columns: Optional[Dict[str, str]] = None) -> int:
+                    constant_columns: Optional[Dict[str, str]] = None,
+                    cached_csv_path: Optional[str] = None) -> int:
         """
         导入 XLSX 文件（通过 Pandas 桥接）
 
@@ -147,45 +148,141 @@ class DuckDBEngine:
             sheet_name: 要导入的 sheet 名称
             header_row: 表头行号（0-indexed）
             constant_columns: 常量列 {列名: 值}，用于手动填写的字段（如公司名）
+            cached_csv_path: 可选，分析阶段缓存的临时 CSV 路径。提供后可跳过 openpyxl 重读
 
         Returns:
             导入的行数
         """
-        kwargs = {}
-        if sheet_name:
-            kwargs['sheet_name'] = sheet_name
-        if header_row is not None:
-            kwargs['header'] = header_row
-        df = pd.read_excel(xlsx_path, **kwargs)
+        import openpyxl, tempfile, csv as csv_module, uuid
 
-        # 清洗列名：去除首尾空格，避免 Excel 中 "账户 " 之类的尾部空格导致映射失败
-        df.columns = [str(c).strip() for c in df.columns]
+        # 如果有缓存的临时 CSV，跳过 openpyxl 直接导入
+        if cached_csv_path and os.path.exists(cached_csv_path):
+            print(f"[DUCKDB IMPORT_XLSX] 使用缓存 CSV: {cached_csv_path}")
+            csv_options = "header=true, all_varchar=true, quote='\"'"
+            if rename_mapping:
+                import pandas as _pd
+                _header_df = _pd.read_csv(cached_csv_path, nrows=1)
+                csv_cols = list(_header_df.columns)
+                select_parts = []
+                for csv_col in csv_cols:
+                    if csv_col in rename_mapping:
+                        select_parts.append(f'"{csv_col}" AS "{rename_mapping[csv_col]}"')
+                    else:
+                        select_parts.append(f'"{csv_col}"')
+                select_clause = ', '.join(select_parts)
+                self._conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+                self._conn.execute(f'''
+                    CREATE TABLE "{table_name}" AS
+                    SELECT {select_clause}
+                    FROM read_csv_auto('{cached_csv_path}', {csv_options})
+                ''')
+            else:
+                self._conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+                self._conn.execute(f'''
+                    CREATE TABLE "{table_name}" AS
+                    SELECT * FROM read_csv_auto('{cached_csv_path}', {csv_options})
+                ''')
 
-        # 添加常量列（如手动填写的公司名）
-        if constant_columns:
-            for col_name, col_value in constant_columns.items():
-                if col_name not in df.columns:
-                    df[col_name] = col_value
-                    print(f"[DUCKDB IMPORT_XLSX] 添加常量列 {col_name} = {col_value}")
-        print(f"[DUCKDB IMPORT_XLSX] 读取 Excel: {len(df)} 行, {len(df.columns)} 列, 列名: {list(df.columns)}")
+            if constant_columns:
+                existing_cols = {c['name'] for c in self.get_schema(table_name)}
+                for col_name, col_value in constant_columns.items():
+                    if col_name not in existing_cols:
+                        try:
+                            self._conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{col_name}" VARCHAR')
+                        except Exception:
+                            pass
+                    self._conn.execute(f'UPDATE "{table_name}" SET "{col_name}" = \'{col_value}\'')
+
+            result = self._conn.execute(f"SELECT COUNT(*) FROM \"{table_name}\"").fetchone()
+            print(f"[DUCKDB IMPORT_XLSX] 缓存导入完成, {result[0]} 行")
+            return result[0]
+
+        # 大文件优化：用 openpyxl 流式读取 → 临时 CSV → DuckDB 原生导入
+        wb = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
+        ws = wb[sheet_name] if sheet_name else wb.active
+
+        # 读表头行并清洗列名（跳过空列和 Unnamed 列）
+        header_row_idx = header_row if header_row is not None else 0
+        headers = []
+        valid_col_indices = []
+        for i, row in enumerate(ws.iter_rows(values_only=True)):
+            if i < header_row_idx:
+                continue
+            if i == header_row_idx:
+                for ci, c in enumerate(row):
+                    h = str(c).strip() if c else ''
+                    # 跳过空列和 openpyxl 自动命名的 Unnamed 列
+                    if h and not h.startswith('Unnamed'):
+                        headers.append(h)
+                        valid_col_indices.append(ci)
+                break
+        if not headers:
+            wb.close()
+            raise Exception("无法读取 Excel 表头行")
+
+        # 写临时 CSV 供 DuckDB 原生导入（只写有效列）
+        tmp_csv = os.path.join(os.path.dirname(xlsx_path) or '.', f'_tmp_import_{uuid.uuid4().hex[:8]}.csv')
+        row_count = 0
+        with open(tmp_csv, 'w', encoding='utf-8', newline='') as f:
+            writer = csv_module.writer(f)
+            writer.writerow(headers)
+            for i, row in enumerate(ws.iter_rows(values_only=True)):
+                if i <= header_row_idx:
+                    continue
+                vals = [str(c).strip() if c is not None else '' for c in row]
+                # 只取有效列
+                filtered = [vals[ci] if ci < len(vals) else '' for ci in valid_col_indices]
+                writer.writerow(filtered)
+                row_count += 1
+        wb.close()
+        print(f"[DUCKDB IMPORT_XLSX] 流式读取 {row_count} 行至临时 CSV（{len(headers)} 列）: {tmp_csv}")
+
+        # DuckDB 原生 CSV 导入（极快且省内存）
+        csv_options = "header=true, all_varchar=true, quote='\"'"
         if rename_mapping:
-            df_cols_before = list(df.columns)
-            mapped = [c for c in df_cols_before if c in rename_mapping]
-            not_mapped = [c for c in df_cols_before if c not in rename_mapping]
-            df = df.rename(columns=rename_mapping)
-            print(f"[DUCKDB IMPORT_XLSX] 已映射: {mapped}, 未映射(已保留): {not_mapped}")
-            print(f"[DUCKDB IMPORT_XLSX] 重命名后列: {list(df.columns)}")
+            import pandas as _pd
+            _header_df = _pd.read_csv(tmp_csv, nrows=1)
+            csv_cols = list(_header_df.columns)
+            select_parts = []
+            for csv_col in csv_cols:
+                if csv_col in rename_mapping:
+                    select_parts.append(f'"{csv_col}" AS "{rename_mapping[csv_col]}"')
+                else:
+                    select_parts.append(f'"{csv_col}"')
+            select_clause = ', '.join(select_parts)
+            self._conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+            self._conn.execute(f'''
+                CREATE TABLE "{table_name}" AS
+                SELECT {select_clause}
+                FROM read_csv_auto('{tmp_csv}', {csv_options})
+            ''')
+            print(f"[DUCKDB IMPORT_XLSX] 已映射并导入")
+        else:
+            self._conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+            self._conn.execute(f'''
+                CREATE TABLE "{table_name}" AS
+                SELECT * FROM read_csv_auto('{tmp_csv}', {csv_options})
+            ''')
 
-        # 确保科目编号以文本形式存储，避免数字类型导致 ".0" 后缀
-        if '科目编号' in df.columns:
-            df['科目编号'] = df['科目编号'].apply(
-                lambda x: str(int(x)) if pd.notna(x) and isinstance(x, (int, float)) and x == int(x)
-                          else str(x) if pd.notna(x)
-                          else None
-            )
+        # 添加常量列
+        if constant_columns:
+            existing_cols = {c['name'] for c in self.get_schema(table_name)}
+            for col_name, col_value in constant_columns.items():
+                if col_name not in existing_cols:
+                    try:
+                        self._conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{col_name}" VARCHAR')
+                    except Exception:
+                        pass
+                self._conn.execute(f'UPDATE "{table_name}" SET "{col_name}" = \'{col_value}\'')
+                print(f"[DUCKDB IMPORT_XLSX] 添加常量列 {col_name} = {col_value}")
 
-        self._conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
-        self._conn.execute(f'CREATE TABLE "{table_name}" AS SELECT * FROM df')
+        # 清理临时 CSV
+        try:
+            os.remove(tmp_csv)
+        except Exception:
+            pass
+
+        # 获取导入行数
         result = self._conn.execute(f"SELECT COUNT(*) FROM \"{table_name}\"").fetchone()
         print(f"[DUCKDB IMPORT_XLSX] 表 {table_name} 创建完成, {result[0]} 行")
 
@@ -404,6 +501,10 @@ class DuckDBEngine:
         except Exception as e:
             print(f"[DUCKDB] 文件清理失败: {e}")
         return False
+
+    def get_connection(self):
+        """返回底层 DuckDB 连接（用于 AnalysisEngine 复用）"""
+        return self._conn
 
     def close(self):
         """关闭连接"""

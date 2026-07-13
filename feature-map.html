@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>功能清单 — JET 数据处理工具</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #f5f6fa;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 40px;
+    display: flex; flex-direction: column; align-items: center;
+    color: #1a1a2e;
+  }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .sub { font-size: 13px; color: #888; margin-bottom: 32px; }
+
+  .grid {
+    max-width: 1200px; width: 100%;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    gap: 16px;
+  }
+
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid #e8ecf0;
+    overflow: hidden;
+    transition: box-shadow 0.15s;
+  }
+  .card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+
+  .card-header {
+    padding: 12px 16px;
+    font-weight: 600;
+    font-size: 14px;
+    display: flex; align-items: center; gap: 8px;
+    border-bottom: 1px solid #f0f2f5;
+  }
+  .card-header .icon { font-size: 18px; }
+  .card-header .count {
+    margin-left: auto;
+    font-size: 11px; font-weight: 400; color: #aaa;
+  }
+
+  .card-body { padding: 4px 0; }
+
+  .feature {
+    display: flex; align-items: flex-start;
+    padding: 8px 16px;
+    font-size: 13px;
+    gap: 8px;
+    border-bottom: 1px solid #f5f6f8;
+    transition: background 0.1s;
+  }
+  .feature:last-child { border-bottom: none; }
+  .feature:hover { background: #fafbfc; }
+
+  .feature .name {
+    flex: 0 0 auto;
+    font-weight: 500;
+    color: #333;
+    min-width: 102px;
+  }
+  .feature .desc {
+    flex: 1;
+    font-size: 12px;
+    color: #777;
+    line-height: 1.5;
+  }
+
+  /* ── AI 高亮行 ── */
+  .feature.ai {
+    background: #fff8f0;
+    border-left: 3px solid #d46b08;
+  }
+  .feature.ai:hover { background: #fff2e5; }
+  .feature.ai .name { color: #c45a0a; }
+  .feature.ai + .feature.ai { border-top: none; }
+
+  /* ── module colors ── */
+  .m-data    .card-header { background: #eaf4fe; color: #1a5dc9; }
+  .m-mapping .card-header { background: #e8f8e8; color: #2d7a2d; }
+  .m-test    .card-header { background: #f0e6ff; color: #6b3fa0; }
+  .m-report  .card-header { background: #fde6f0; color: #b33a6b; }
+  .m-recon   .card-header { background: #e6f5f5; color: #1a7a7a; }
+  .m-query   .card-header { background: #e6f0ff; color: #2a6bb0; }
+  .m-rules   .card-header { background: #fef6e6; color: #b87a0a; }
+  .m-ux      .card-header { background: #f5f0e8; color: #8a7a5a; }
+
+  .footer { margin-top: 32px; font-size: 12px; color: #bbb; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>📋 功能清单</h1>
+<p class="sub">JET 数据处理工具 · v1.4.0 · 按模块分组 · <span style="color:#d46b08">▎橙色左边线</span> 为涉及 AI 的功能</p>
+
+<div class="grid">
+
+  <!-- ══════════ 数据导入 ══════════ -->
+  <div class="card m-data">
+    <div class="card-header">
+      <span class="icon">📤</span> 数据导入
+      <span class="count">3 项</span>
+    </div>
+    <div class="card-body">
+      <div class="feature">
+        <span class="name">文件预览</span>
+        <span class="desc">上传前预览前 15 行原始数据，支持多 Sheet 选择和自定义表头行指定，检测编码（UTF-8/UTF-8 BOM/GBK/latin-1）</span>
+      </div>
+      <div class="feature">
+        <span class="name">序时账上传</span>
+        <span class="desc">支持 xlsx/csv 格式，单文件最大 4GB，基于 DuckDB 引擎自动检测字段类型并加载到临时表，大文件高性能</span>
+      </div>
+      <div class="feature">
+        <span class="name">科目余额表上传</span>
+        <span class="desc">可选上传，多 Sheet 选择，独立于序时账的 Sheet/表头行配置，用于后续完整性测试和交叉验证</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ 字段映射 ══════════ -->
+  <div class="card m-mapping">
+    <div class="card-header">
+      <span class="icon">🔗</span> 字段映射
+      <span class="count">5 项</span>
+    </div>
+    <div class="card-body">
+      <div class="feature">
+        <span class="name">智能推荐映射</span>
+        <span class="desc">基于列名关键词自动匹配 13 个序时账标准字段和 12 个科目余额表标准字段，字段名含关键词（如"日期""摘要""科目编号"）自动匹配</span>
+      </div>
+      <div class="feature ai">
+        <span class="name">AI 智能映射</span>
+        <span class="desc">调用 AI 根据列名、数据类型和样本值综合推断含义，推荐最合适的标准字段映射关系</span>
+      </div>
+      <div class="feature">
+        <span class="name">手动字段映射</span>
+        <span class="desc">下拉选择源字段→标准字段，支持手动填写常数值（如公司名、币种等常量字段），可覆盖 AI 推荐结果</span>
+      </div>
+      <div class="feature">
+        <span class="name">双表映射</span>
+        <span class="desc">同时支持序时账和科目余额表两套独立的标准字段映射，各自保存互不干扰</span>
+      </div>
+      <div class="feature">
+        <span class="name">映射历史记录</span>
+        <span class="desc">自动保存映射关系到文件，同文件（按文件名+大小+列名校验）再次上传时可一键应用上次的映射配置</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ 完整性测试 ══════════ -->
+  <div class="card m-test">
+    <div class="card-header">
+      <span class="icon">✅</span> 完整性测试
+      <span class="count">10 项</span>
+    </div>
+    <div class="card-body">
+      <div class="feature ai">
+        <span class="name">AI 智能建议</span>
+        <span class="desc">自动分析数据特征：检测凭证号空值比例、科目余额表父子层级、金额字段方向等，预填推荐配置项供用户确认</span>
+      </div>
+      <div class="feature">
+        <span class="name">4 步引导配置</span>
+        <span class="desc">预处理（向下填充/剔除空行和合计行）→ 金额处理（借正贷负方向调整/借贷方模式）→ 特殊调整（反结转/末级科目）→ 运行三项检查</span>
+      </div>
+      <div class="feature">
+        <span class="name">反结转处理</span>
+        <span class="desc">自动按本年利润科目识别损益结转凭证并剔除，支持自定义科目编号（如 4103、410303）和摘要关键词（如"结转""损益"）</span>
+      </div>
+      <div class="feature">
+        <span class="name">末级科目筛选</span>
+        <span class="desc">自动识别科目编号父子层级关系，仅用末级科目参与计算，剔除上级汇总科目的重复计算</span>
+      </div>
+      <div class="feature">
+        <span class="name">币种筛选</span>
+        <span class="desc">按币种过滤科目余额表数据，从表中提取实际出现的币种值供下拉选择，支持多币种场景</span>
+      </div>
+      <div class="feature">
+        <span class="name">向下填充</span>
+        <span class="desc">凭证号、日期、制单人按凭证分组向下填充（处理源数据仅在凭证首行有值、其余行空的情况），避免误删有效数据</span>
+      </div>
+      <div class="feature">
+        <span class="name">序时账完整性测试</span>
+        <span class="desc">按凭证分组汇总发生额，检查借贷是否平衡，统计正数/负数/零值分组数量，列出非零分组的差异明细</span>
+      </div>
+      <div class="feature">
+        <span class="name">科目余额表完整性测试</span>
+        <span class="desc">汇总期初余额和期末余额，计算发生额（期末-期初），检查发生额是否归零，反结转模式下扣除结转损益调整</span>
+      </div>
+      <div class="feature">
+        <span class="name">交叉验证</span>
+        <span class="desc">按公司+科目编号比对方科目余额表发生额与序时账发生额的一致性，列出仅序时账有/仅余额表有/金额差异的科目明细</span>
+      </div>
+      <div class="feature ai">
+        <span class="name">AI 差异分析</span>
+        <span class="desc">自动分析异常模式，从财务系统导出问题（范围/方向/期间）、数据自身问题（未结转/借贷不平/科目缺失）和用户配置问题等审计视角给出原因和建议</span>
+      </div>
+      <div class="feature">
+        <span class="name">测试结果导出 Excel</span>
+        <span class="desc">3 Sheet 全量明细导出：序时账完整性（含汇总金额和凭证分组明细）、科目余额表完整性（含期初期末和归零检查）、交叉验证（含逐科目差异明细）</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ 财务报表清洗 ══════════ -->
+  <div class="card m-report">
+    <div class="card-header">
+      <span class="icon">🧹</span> 财务报表清洗
+      <span class="count">4 项</span>
+    </div>
+    <div class="card-body">
+      <div class="feature">
+        <span class="name">报表文件上传</span>
+        <span class="desc">支持 xlsx/xls 格式，多 Sheet 列表选择，上传后自动识别 Sheet 结构</span>
+      </div>
+      <div class="feature ai">
+        <span class="name">AI 结构识别</span>
+        <span class="desc">读前 10 行自动判断报表类型（资产负债表/利润表）、列映射关系和布局结构</span>
+      </div>
+      <div class="feature">
+        <span class="name">规则引擎提取</span>
+        <span class="desc">全规则引擎处理，不调 AI，处理左右分栏布局、汇总行剔除、签名行识别等复杂场景，输出标准化数据</span>
+      </div>
+      <div class="feature">
+        <span class="name">多报表导入合并</span>
+        <span class="desc">支持资产负债表和利润表分别导入后合并，前端直接传已提取的报表数据列表</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ 科目余额表与报表核对 ══════════ -->
+  <div class="card m-recon">
+    <div class="card-header">
+      <span class="icon">📊</span> 科目余额表与报表核对
+      <span class="count">7 项</span>
+    </div>
+    <div class="card-body">
+      <div class="feature ai">
+        <span class="name">科目→报表项目映射</span>
+        <span class="desc">规则引擎（100+ 条基于编号前缀和名称关键词的映射规则）+ AI 兜底，自动将科目余额表的每条科目对应到财务报表项目</span>
+      </div>
+      <div class="feature">
+        <span class="name">模糊匹配对齐</span>
+        <span class="desc">自动去除中文编号前缀（如"一、""（1）"等），清洗异体字（"帐"→"账"、"（"→"("），提升匹配准确率</span>
+      </div>
+      <div class="feature">
+        <span class="name">同类科目分组</span>
+        <span class="desc">自动按科目类型归类为资产/负债/权益/收入/费用，便于快速识别映射范围</span>
+      </div>
+      <div class="feature">
+        <span class="name">可编辑映射界面</span>
+        <span class="desc">双栏布局，左侧科目余额表每条记录可修改映射到的报表项目，右侧实时刷新金额对比和差异结果</span>
+      </div>
+      <div class="feature">
+        <span class="name">一键优化映射</span>
+        <span class="desc">贪心爬山算法，自动尝试单科目移动和跨项目交换，以最小化总绝对差异为目标迭代优化映射方案</span>
+      </div>
+      <div class="feature ai">
+        <span class="name">AI 差异分析</span>
+        <span class="desc">分析差异模式，自动发现映射调换（两个项目差异金额接近可能是映射反了）、归属错误、遗漏科目等问题并给出具体建议</span>
+      </div>
+      <div class="feature">
+        <span class="name">核对结果导出 Excel</span>
+        <span class="desc">导出带差异高亮标识的核对结果，包含科目余额表与映射关系 Sheet 和按报表项目汇总的核对结果 Sheet</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ 智能查询 ══════════ -->
+  <div class="card m-query">
+    <div class="card-header">
+      <span class="icon">💬</span> 智能查询
+      <span class="count">11 项</span>
+    </div>
+    <div class="card-body">
+      <div class="feature">
+        <span class="name">自然语言查询输入</span>
+        <span class="desc">支持中文自然语言描述分析需求，如"筛选出摘要中包含调整的凭证"或"统计每个科目的本月发生额"</span>
+      </div>
+      <div class="feature ai">
+        <span class="name">AI 查询语义优化</span>
+        <span class="desc">将模糊概念变具体（"月底"→"每个月最后五天"），扩展中文关键词的英文/缩写变体（"调整"→"adj、adjustment"），识别人名补充拼音变体</span>
+      </div>
+      <div class="feature ai">
+        <span class="name">AI 生成 DuckDB SQL</span>
+        <span class="desc">调用 AI 根据自然语言查询和表结构生成可执行 DuckDB SQL，自动处理日期格式转换、字段类型强制转换和文本匹配</span>
+      </div>
+      <div class="feature">
+        <span class="name">默认全字段呈现</span>
+        <span class="desc">用户未指定具体字段时（如"查一下数据""显示序时账"等模糊查询），默认使用 SELECT * 返回全部字段，让用户看到完整数据全貌</span>
+      </div>
+      <div class="feature">
+        <span class="name">SQL 手动编辑</span>
+        <span class="desc">CodeMirror 代码编辑器，支持在 AI 生成 SQL 后手动修改 WHERE 条件和查询逻辑，适合有 SQL 基础的用户灵活调整</span>
+      </div>
+      <div class="feature">
+        <span class="name">SQL 安全执行</span>
+        <span class="desc">DuckDB 只读执行，代码层做 SELECT 白名单校验（禁止 INSERT/UPDATE/DELETE/DROP/ALTER），独立会话数据库隔离</span>
+      </div>
+      <div class="feature ai">
+        <span class="name">AI 代码复核</span>
+        <span class="desc">第二 AI 模型从语法检查、安全审查、意图匹配、性能优化四个维度审查生成的 SQL，每维度独立显示通过/需关注状态</span>
+      </div>
+      <div class="feature ai">
+        <span class="name">SQL 代码解释</span>
+        <span class="desc">逐行解释 SQL 查询中关键子句的含义，辅助非技术用户理解查询逻辑</span>
+      </div>
+      <div class="feature">
+        <span class="name">结果导出</span>
+        <span class="desc">支持 CSV（DuckDB COPY 原生高速导出）和 Excel（带查询信息和代码解释的格式化工簿）两种格式</span>
+      </div>
+      <div class="feature">
+        <span class="name">查询历史</span>
+        <span class="desc">自动保存前 50 条查询记录（含自然语言、SQL 代码和时间戳），支持回溯历史查询</span>
+      </div>
+      <div class="feature">
+        <span class="name">收藏查询</span>
+        <span class="desc">收藏常用查询及结果数据，支持批量选择导出为多 Sheet Excel，每条收藏含自然语言、SQL 和结果数据</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ 预设筛选规则 ══════════ -->
+  <div class="card m-rules">
+    <div class="card-header">
+      <span class="icon">📦</span> 预设筛选规则
+      <span class="count">4 项</span>
+    </div>
+    <div class="card-body">
+      <div class="feature">
+        <span class="name">通用筛选规则包</span>
+        <span class="desc">内置大额交易检测、整月无凭证检测、借贷不平衡检测等通用财务筛选规则，适用于所有行业的基线检查</span>
+      </div>
+      <div class="feature">
+        <span class="name">行业异常特征包</span>
+        <span class="desc">内置针对服务、贸易、房地产、制造、建筑等常见行业的异常特征筛选规则</span>
+      </div>
+      <div class="feature">
+        <span class="name">EY GAM 异常筛选包</span>
+        <span class="desc">内置安永 GAM 方法论 13 条异常凭证筛选规则，涵盖非标准分录、非常规日期、高频调整等场景</span>
+      </div>
+      <div class="feature">
+        <span class="name">自定义规则</span>
+        <span class="desc">用户自定义 SQL 模板规则，支持保存、编辑和删除，可灵活扩展筛选场景</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ UI/UX ══════════ -->
+  <div class="card m-ux">
+    <div class="card-header">
+      <span class="icon">🎨</span> UI / UX
+      <span class="count">2 项</span>
+    </div>
+    <div class="card-body">
+      <div class="feature">
+        <span class="name">步骤进度条</span>
+        <span class="desc">四步引导式流程：文件上传 → 字段映射 → 完整性测试 → 智能查询，当前步骤高亮显示，已完成步骤可回退</span>
+      </div>
+      <div class="feature">
+        <span class="name">大数据量表格</span>
+        <span class="desc">支持长列表纵向滚动和横向字段滚动，分页加载避免一次性渲染阻塞</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">JET 数据处理工具 · 共 47 项功能</div>
+
+</body>
+</html>

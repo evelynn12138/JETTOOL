@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>核心工作流 — JET 数据处理工具</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #f0f2f6;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 60px 40px;
+    display: flex; flex-direction: column; align-items: center;
+    color: #1a1a2e;
+  }
+
+  h1 { font-size: 24px; margin-bottom: 4px; }
+  .sub { font-size: 13px; color: #888; margin-bottom: 48px; text-align: center; }
+
+  .flow {
+    max-width: 880px; width: 100%;
+    position: relative;
+    padding-left: 48px;
+  }
+
+  .flow::before {
+    content: "";
+    position: absolute; left: 20px; top: 8px; bottom: 8px;
+    width: 2px;
+    background: linear-gradient(to bottom, #c8cdd4 0%, #c8cdd4 85%, transparent 100%);
+  }
+
+  .step { position: relative; margin-bottom: 28px; }
+  .step:last-child { margin-bottom: 0; }
+
+  .step-dot {
+    position: absolute; left: -36px; top: 18px;
+    width: 18px; height: 18px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 700; color: #fff;
+    z-index: 1; box-shadow: 0 0 0 4px #f0f2f6;
+  }
+
+  .step-card {
+    background: #fff; border-radius: 14px;
+    border: 1px solid #e6e9ed; overflow: hidden;
+    transition: box-shadow 0.2s;
+  }
+  .step-card:hover { box-shadow: 0 6px 24px rgba(0,0,0,0.06); }
+
+  .step-header {
+    padding: 16px 22px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .step-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 1px; opacity: 0.55;
+  }
+  .step-title { font-size: 16px; font-weight: 600; }
+  .step-count { margin-left: auto; font-size: 11px; color: #bbb; }
+
+  .step-body {
+    padding: 0 22px 10px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 0;
+  }
+
+  .item {
+    padding: 8px 0 8px 12px;
+    border-left: 2px solid #eef0f3;
+    margin-bottom: 2px;
+    border-radius: 0 4px 4px 0;
+  }
+  .item:hover { background: #fafbfc; }
+
+  .item .name {
+    font-size: 13px; font-weight: 500; color: #333;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .item .desc {
+    font-size: 11.5px; color: #888; line-height: 1.5;
+    margin-top: 2px;
+  }
+
+  .item.ai {
+    border-left-color: #d46b08;
+    background: linear-gradient(to right, #fffaf5, transparent);
+  }
+  .item.ai:hover { background: linear-gradient(to right, #fff5eb, #fafbfc); }
+  .item.ai .name { color: #c45a0a; }
+  .item.ai .name::after {
+    content: "AI";
+    font-size: 8px; font-weight: 700; letter-spacing: 0.3px;
+    background: #d46b08; color: #fff;
+    padding: 0 5px; border-radius: 6px; line-height: 16px;
+  }
+
+  .group-label {
+    grid-column: 1 / -1;
+    padding: 12px 0 2px 12px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
+    display: flex; align-items: center; gap: 6px;
+    border-top: 1px solid #f0f2f6; margin-top: 6px;
+  }
+  .group-label:first-of-type { border-top: none; margin-top: 0; }
+
+  .c-data  .step-dot { background: #1a5dc9; }
+  .c-data  .step-header { background: linear-gradient(135deg, #eaf4fe, #f4f9ff); }
+  .c-data  .step-title { color: #1a5dc9; }
+  .c-data  .group-label { color: #1a5dc9; }
+
+  .c-map   .step-dot { background: #2d7a2d; }
+  .c-map   .step-header { background: linear-gradient(135deg, #e8f8e8, #f2faf2); }
+  .c-map   .step-title { color: #2d7a2d; }
+  .c-map   .group-label { color: #2d7a2d; }
+
+  .c-test  .step-dot { background: #6b3fa0; }
+  .c-test  .step-header { background: linear-gradient(135deg, #f0e6ff, #f6f0ff); }
+  .c-test  .step-title { color: #6b3fa0; }
+  .c-test  .group-label { color: #6b3fa0; }
+
+  .c-query .step-dot { background: #2a6bb0; }
+  .c-query .step-header { background: linear-gradient(135deg, #e6f0ff, #eef6ff); }
+  .c-query .step-title { color: #2a6bb0; }
+  .c-query .group-label { color: #2a6bb0; }
+
+  .footer { margin-top: 40px; font-size: 12px; color: #bbb; text-align: center; }
+
+  @media (max-width: 640px) {
+    body { padding: 30px 16px; }
+    .flow { padding-left: 36px; }
+    .step-dot { left: -30px; width: 16px; height: 16px; font-size: 7px; }
+    .step-body { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<h1>📋 核心工作流</h1>
+<p class="sub">JET 数据处理工具 · v1.4.0 · <span style="color:#d46b08">AI</span> 标记为 AI 驱动功能</p>
+
+<div class="flow">
+
+  <!-- ═══════ 1: 数据导入 ═══════ -->
+  <div class="step c-data">
+    <div class="step-dot">1</div>
+    <div class="step-card">
+      <div class="step-header">
+        <span class="step-label">STEP 01</span>
+        <span class="step-title">数据导入</span>
+        <span class="step-count">3 项</span>
+      </div>
+      <div class="step-body">
+        <div class="item">
+          <div class="name">文件预览</div>
+          <div class="desc">预览前 15 行，多 Sheet 选择，自定义表头行，自动检测编码</div>
+        </div>
+        <div class="item">
+          <div class="name">序时账上传</div>
+          <div class="desc">xlsx/csv 格式，最大 4GB，DuckDB 引擎自动检测类型，大文件高性能</div>
+        </div>
+        <div class="item">
+          <div class="name">科目余额表上传</div>
+          <div class="desc">可选上传，独立配置 Sheet 和表头行，用于交叉验证</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════ 2: 字段映射 ═══════ -->
+  <div class="step c-map">
+    <div class="step-dot">2</div>
+    <div class="step-card">
+      <div class="step-header">
+        <span class="step-label">STEP 02</span>
+        <span class="step-title">字段映射</span>
+        <span class="step-count">5 项</span>
+      </div>
+      <div class="step-body">
+        <div class="item">
+          <div class="name">智能推荐映射</div>
+          <div class="desc">列名关键词自动匹配序时账 13 个 / 余额表 12 个标准字段</div>
+        </div>
+        <div class="item ai">
+          <div class="name">AI 智能映射</div>
+          <div class="desc">AI 根据列名、类型和样本值推断每列含义，推荐映射关系</div>
+        </div>
+        <div class="item">
+          <div class="name">手动字段映射</div>
+          <div class="desc">下拉选择源字段→标准字段，支持常数值手动填写</div>
+        </div>
+        <div class="item">
+          <div class="name">双表映射</div>
+          <div class="desc">序时账和科目余额表两套独立映射，互不干扰</div>
+        </div>
+        <div class="item">
+          <div class="name">映射历史记录</div>
+          <div class="desc">自动保存配置，同文件再上传可一键应用上次映射</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════ 3: 数据验证与清洗 ═══════ -->
+  <div class="step c-test">
+    <div class="step-dot">3</div>
+    <div class="step-card">
+      <div class="step-header">
+        <span class="step-label">STEP 03</span>
+        <span class="step-title">数据验证与清洗</span>
+        <span class="step-count">21 项</span>
+      </div>
+      <div class="step-body">
+
+        <div class="group-label">✅ 完整性测试</div>
+        <div class="item ai">
+          <div class="name">AI 智能建议</div>
+          <div class="desc">分析数据特征，预填推荐配置供用户确认</div>
+        </div>
+        <div class="item">
+          <div class="name">4 步引导配置</div>
+          <div class="desc">预处理 → 金额处理 → 特殊调整 → 运行三项检查</div>
+        </div>
+        <div class="item">
+          <div class="name">反结转处理</div>
+          <div class="desc">自定义科目号和关键词，自动剔除结转损益凭证</div>
+        </div>
+        <div class="item">
+          <div class="name">末级科目筛选</div>
+          <div class="desc">识别父子层级，仅用末级科目参与计算</div>
+        </div>
+        <div class="item">
+          <div class="name">序时账完整性测试</div>
+          <div class="desc">按凭证分组检查借贷平衡，统计正/负/零值分组</div>
+        </div>
+        <div class="item">
+          <div class="name">科目余额表完整性测试</div>
+          <div class="desc">汇总期初期末，检查发生额归零</div>
+        </div>
+        <div class="item">
+          <div class="name">交叉验证</div>
+          <div class="desc">按科目比对两表发生额一致性，逐科目差异明细</div>
+        </div>
+        <div class="item ai">
+          <div class="name">AI 差异分析</div>
+          <div class="desc">审计视角分析异常原因，给出处理建议</div>
+        </div>
+        <div class="item">
+          <div class="name">测试结果导出</div>
+          <div class="desc">3 Sheet 全量明细导出</div>
+        </div>
+
+        <div class="group-label">🧹 财务报表清洗</div>
+        <div class="item">
+          <div class="name">报表文件上传</div>
+          <div class="desc">xlsx/xls，多 Sheet 选择</div>
+        </div>
+        <div class="item ai">
+          <div class="name">AI 结构识别</div>
+          <div class="desc">读前 10 行自动判断报表类型、列映射和布局</div>
+        </div>
+        <div class="item">
+          <div class="name">规则引擎提取</div>
+          <div class="desc">全规则处理左右分栏、汇总行、签名行，不调 AI</div>
+        </div>
+        <div class="item">
+          <div class="name">多报表导入合并</div>
+          <div class="desc">资产负债表和利润表分别导入后合并</div>
+        </div>
+
+        <div class="group-label">📊 科目余额表与报表核对</div>
+        <div class="item ai">
+          <div class="name">科目→报表项目映射</div>
+          <div class="desc">规则引擎（100+ 条）+ AI 兜底，自动对应财务报表项目</div>
+        </div>
+        <div class="item">
+          <div class="name">模糊匹配对齐</div>
+          <div class="desc">去除编号前缀、清洗异体字，提升匹配准确率</div>
+        </div>
+        <div class="item">
+          <div class="name">同类科目分组</div>
+          <div class="desc">按类型归类：资产 / 负债 / 权益 / 收入 / 费用</div>
+        </div>
+        <div class="item">
+          <div class="name">可编辑映射界面</div>
+          <div class="desc">双栏布局，左侧改映射右侧实时刷新差异</div>
+        </div>
+        <div class="item">
+          <div class="name">一键优化映射</div>
+          <div class="desc">爬山算法自动调整映射，最小化总差异</div>
+        </div>
+        <div class="item ai">
+          <div class="name">AI 差异分析</div>
+          <div class="desc">发现映射调换、归属错误、遗漏科目等问题</div>
+        </div>
+        <div class="item">
+          <div class="name">核对结果导出</div>
+          <div class="desc">带差异标识的 Excel，含映射关系和汇总表</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════ 4: 智能查询 ═══════ -->
+  <div class="step c-query">
+    <div class="step-dot">4</div>
+    <div class="step-card">
+      <div class="step-header">
+        <span class="step-label">STEP 04</span>
+        <span class="step-title">智能查询</span>
+        <span class="step-count">11 项</span>
+      </div>
+      <div class="step-body">
+        <div class="item">
+          <div class="name">自然语言查询输入</div>
+          <div class="desc">中文描述分析需求，如"筛选调整凭证""统计科目汇总"</div>
+        </div>
+        <div class="item ai">
+          <div class="name">AI 查询语义优化</div>
+          <div class="desc">模糊概念变具体，中英文关键词扩展，人名拼音变体补充</div>
+        </div>
+        <div class="item ai">
+          <div class="name">AI 生成 DuckDB SQL</div>
+          <div class="desc">自然语言→可执行 SQL，自动处理日期和类型转换</div>
+        </div>
+        <div class="item">
+          <div class="name">默认全字段呈现</div>
+          <div class="desc">未指定字段时默认 SELECT *，始终看到完整数据</div>
+        </div>
+        <div class="item">
+          <div class="name">SQL 手动编辑</div>
+          <div class="desc">CodeMirror 编辑器，灵活调整查询逻辑</div>
+        </div>
+        <div class="item">
+          <div class="name">SQL 安全执行</div>
+          <div class="desc">DuckDB 只读 + SELECT 白名单校验，会话隔离</div>
+        </div>
+        <div class="item ai">
+          <div class="name">AI 代码复核</div>
+          <div class="desc">四维审查：语法、安全、意图、性能</div>
+        </div>
+        <div class="item ai">
+          <div class="name">SQL 代码解释</div>
+          <div class="desc">逐行说明查询逻辑，辅助非技术用户理解</div>
+        </div>
+        <div class="item">
+          <div class="name">结果导出</div>
+          <div class="desc">CSV 高速导出 / Excel 带说明格式化工簿</div>
+        </div>
+        <div class="item">
+          <div class="name">查询历史</div>
+          <div class="desc">自动保存 50 条，支持回溯</div>
+        </div>
+        <div class="item">
+          <div class="name">收藏查询</div>
+          <div class="desc">收藏常用查询及结果，批量导出多 Sheet</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">JET 数据处理工具 · 核心工作流 · 共 47 项功能</div>
+
+</body>
+</html>

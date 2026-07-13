@@ -29,6 +29,10 @@ intro.html
 DA数据清洗业务AI应用.zip
 test_*.xlsx
 
+# Build artifacts / distribution
+app_dist/
+dist-pkg/
+
 # Electron
 electron/node_modules/
 electron/dist/

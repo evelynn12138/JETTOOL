@@ -168,6 +168,16 @@ def cleanup_session_db():
 
     # 重置会话中的 DuckDB 相关标记
     session.pop('duckdb_imported', None)
+
+    # 清理缓存的 XLSX 临时 CSV
+    cached_csv = session.pop('xlsx_temp_csv', None)
+    if cached_csv and os.path.exists(cached_csv):
+        try:
+            os.remove(cached_csv)
+            app.logger.info(f"[CLEANUP] 已删除 XLSX 缓存 CSV: {cached_csv}")
+        except Exception as e:
+            app.logger.error(f"[CLEANUP] XLSX 缓存 CSV 删除失败: {e}")
+
     app.logger.info(f"[CLEANUP] 会话 {sid} DuckDB 数据已清理")
 
 
@@ -476,21 +486,48 @@ def upload_balance_file():
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], 'balance_' + file.filename)
     file.save(filepath)
 
+    # 如果是 GBK 编码的 CSV，转换为 UTF-8（DuckDB 不支持 GBK）
+    if os.path.splitext(filepath)[1].lower() == '.csv':
+        from modules.analysis_engine import _detect_encoding
+        if _detect_encoding(filepath) == 'gbk':
+            tmp_utf8 = filepath + '.utf8'
+            with open(filepath, 'r', encoding='gbk') as fin, \
+                 open(tmp_utf8, 'w', encoding='utf-8', newline='') as fout:
+                import shutil
+                shutil.copyfileobj(fin, fout)
+            os.replace(tmp_utf8, filepath)
+            app.logger.info(f"[UPLOAD] 科目余额表 CSV 已从 GBK 转换为 UTF-8: {filepath}")
+
     # 解析可选参数：sheet_name 和 header_row
     sheet_name = request.form.get('sheet_name') or None
     header_row_raw = request.form.get('header_row')
     header_row = int(header_row_raw) - 1 if header_row_raw and header_row_raw.isdigit() else None
 
     try:
-        processor = DataProcessor(filepath)
-        data_info = processor.process(
-            sheet_name=sheet_name if sheet_name and sheet_name != '__csv__' else None,
-            header_row=header_row,
-        )
+        from modules.analysis_engine import AnalysisEngine
+        engine = get_duckdb_engine()
+        conn = engine.get_connection()
+        analyzer = AnalysisEngine(filepath, conn, csv_dir=app.config['UPLOAD_FOLDER'])
+        sheet_name_val = sheet_name if sheet_name and sheet_name != '__csv__' else None
+
+        analysis = analyzer.analyze_all(n_sample=100, sheet_name=sheet_name_val,
+                                        header_row=header_row)
+        data_info = {
+            'success': True,
+            'filename': file.filename,
+            'row_count': analysis['total_rows'],
+            'column_count': len(analysis['fields']),
+            'fields': analysis['fields'],
+            'preview': analysis['preview'],
+            'has_mapping': False,
+            'field_mapping': None,
+            'mapped_fields': list(analysis['fields']),
+            'mapped_preview': list(analysis['preview']),
+        }
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
-        print(f"科目余额表处理失败详情: {error_details}")
+        app.logger.error(f"科目余额表处理失败详情: {error_details}")
         return jsonify({'success': False, 'error': f'科目余额表处理失败: {str(e)}'})
 
     session['balance_filepath'] = filepath
@@ -525,6 +562,9 @@ def run_integrity_tests():
         cf_account_code = data.get('cf_account_code', '4103')
         cf_keywords = data.get('cf_keywords', ['结转', '损益'])
         currency_filter = (data.get('currency_filter') or '').strip()
+        fill_voucher_no = data.get('fill_voucher_no', False)
+        fill_date = data.get('fill_date', False)
+        fill_person = data.get('fill_person', False)
 
         engine = get_duckdb_engine()
         table_name = 'data' if engine.table_exists('data') else None
@@ -556,6 +596,9 @@ def run_integrity_tests():
             balance_snapshot_table='balance_integrity',
             cf_account_code=cf_account_code,
             cf_keywords=cf_keywords,
+            fill_voucher_no=fill_voucher_no,
+            fill_date=fill_date,
+            fill_person=fill_person,
         )
 
         session['integrity_results'] = results
@@ -587,6 +630,9 @@ def export_integrity_results():
         leaf_accts = data.get('leaf_accounts', False)
         cf_account_code = data.get('cf_account_code', '4103')
         cf_keywords = data.get('cf_keywords', ['结转', '损益'])
+        fill_voucher_no = data.get('fill_voucher_no', False)
+        fill_date = data.get('fill_date', False)
+        fill_person = data.get('fill_person', False)
 
         # 获取 DuckDB 引擎
         engine = get_duckdb_engine()
@@ -599,7 +645,9 @@ def export_integrity_results():
         # 通过 IntegrityChecker 生成数据（DuckDB SQL 聚合）
         checker = IntegrityChecker(engine, journal_table=table_name, balance_table=balance_table)
         report = checker.export_report(reverse_carry_forward=reverse_cf, leaf_accounts=leaf_accts,
-                                        cf_account_code=cf_account_code, cf_keywords=cf_keywords)
+                                        cf_account_code=cf_account_code, cf_keywords=cf_keywords,
+                                        fill_voucher_no=fill_voucher_no, fill_date=fill_date,
+                                        fill_person=fill_person)
 
         import io
         import openpyxl
@@ -1610,9 +1658,19 @@ def configure_fields():
                 rows = engine.import_csv(filepath, 'data', reverse_mapping, header_row=header_row,
                                          constant_columns=constant_cols)
             elif ext == '.xlsx':
+                cached_csv = session.get('xlsx_temp_csv')
                 rows = engine.import_xlsx(filepath, 'data', reverse_mapping,
                                           sheet_name=sheet_name, header_row=header_row,
-                                          constant_columns=constant_cols)
+                                          constant_columns=constant_cols,
+                                          cached_csv_path=cached_csv)
+                # 导入成功后清理缓存 CSV
+                if cached_csv and os.path.exists(cached_csv):
+                    try:
+                        os.remove(cached_csv)
+                        session.pop('xlsx_temp_csv', None)
+                        app.logger.info(f"[CLEANUP] 已删除 XLSX 缓存 CSV: {cached_csv}")
+                    except Exception as e:
+                        app.logger.warning(f"[CLEANUP] XLSX 缓存 CSV 清理失败: {e}")
             else:
                 rows = 0
             app.logger.info(f"[DUCKDB] 序时账已导入: {filepath} → {rows} 行")
@@ -2589,25 +2647,67 @@ def upload_file():
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
     file.save(filepath)
 
+    # 如果是 GBK 编码的 CSV，转换为 UTF-8（DuckDB 不支持 GBK）
+    if os.path.splitext(filepath)[1].lower() == '.csv':
+        from modules.analysis_engine import _detect_encoding
+        if _detect_encoding(filepath) == 'gbk':
+            tmp_utf8 = filepath + '.utf8'
+            with open(filepath, 'r', encoding='gbk') as fin, \
+                 open(tmp_utf8, 'w', encoding='utf-8', newline='') as fout:
+                import shutil
+                shutil.copyfileobj(fin, fout)
+            os.replace(tmp_utf8, filepath)
+            app.logger.info(f"[UPLOAD] CSV 已从 GBK 转换为 UTF-8: {filepath}")
+
     # 解析可选参数：sheet_name 和 header_row
     sheet_name = request.form.get('sheet_name') or None
     header_row_raw = request.form.get('header_row')
     header_row = int(header_row_raw) - 1 if header_row_raw and header_row_raw.isdigit() else None
     # header_row 在前端从 1 开始计数，转为 0-indexed 传给 pandas
 
+    # 清理旧的缓存 CSV（上传新文件前）
+    old_cached = session.pop('xlsx_temp_csv', None)
+    if old_cached and os.path.exists(old_cached):
+        try:
+            os.remove(old_cached)
+        except Exception:
+            pass
+
     app.logger.info(f"[UPLOAD] sheet_name={sheet_name}, header_row={header_row}(前端输入={header_row_raw})")
 
-    # 调用DataProcessor处理文件
+    # 用 DuckDB 分析文件（替代 DataProcessor + pandas）
     try:
-        processor = DataProcessor(filepath)
-        data_info = processor.process(
-            sheet_name=sheet_name if sheet_name != '__csv__' else None,
-            header_row=header_row,
-        )
+        from modules.analysis_engine import AnalysisEngine
+        engine = get_duckdb_engine()
+        conn = engine.get_connection()
+        analyzer = AnalysisEngine(filepath, conn, csv_dir=app.config['UPLOAD_FOLDER'])
+        sheet_name_val = sheet_name if sheet_name and sheet_name != '__csv__' else None
+
+        # analyze_all 将 CSV 加载到 DuckDB 临时表一次，后续操作不复读文件
+        analysis = analyzer.analyze_all(n_sample=100, sheet_name=sheet_name_val,
+                                        header_row=header_row)
+        data_info = {
+            'success': True,
+            'filename': file.filename,
+            'row_count': analysis['total_rows'],
+            'column_count': len(analysis['fields']),
+            'fields': analysis['fields'],
+            'preview': analysis['preview'],
+            'has_mapping': False,
+            'field_mapping': None,
+            'mapped_fields': list(analysis['fields']),
+            'mapped_preview': list(analysis['preview']),
+        }
+
+        # 缓存 XLSX 的临时 CSV 路径供后续导入复用
+        if analyzer.cached_csv_path:
+            session['xlsx_temp_csv'] = analyzer.cached_csv_path
+            app.logger.info(f"[UPLOAD] XLSX 临时 CSV 已缓存: {analyzer.cached_csv_path}")
+
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
-        print(f"文件处理失败详情: {error_details}")
+        app.logger.error(f"文件处理失败详情: {error_details}")
         # 清理上传失败的文件
         if os.path.exists(filepath):
             try:

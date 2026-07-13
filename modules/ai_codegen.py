@@ -108,19 +108,20 @@ class AICodeGenerator:
 ## SQL 要求
 1. **必须只包含 SELECT 查询**，不包含 INSERT/UPDATE/DELETE/CREATE/DROP/ALTER
 2. 使用双引号包裹表名和列名（防止中文字符问题）：如 FROM "data"
-3. 金额字段可能需要 CAST 为 DOUBLE：CAST("金额" AS DOUBLE)
-4. **日期处理**：严禁使用 strftime 函数。替代方案：
+3. **默认呈现全部字段**：如果用户没有明确指定想看哪些字段（如"查一下数据"、"显示序时账"等模糊查询），使用 `SELECT *` 返回所有字段。仅在用户明确提出特定字段需求时，才写具体的列名。
+4. 金额字段可能需要 CAST 为 DOUBLE：CAST("金额" AS DOUBLE)
+5. **日期处理**：严禁使用 strftime 函数。替代方案：
    - 提取年份：EXTRACT(YEAR FROM CAST("日期" AS DATE))
    - 提取月份：EXTRACT(MONTH FROM CAST("日期" AS DATE))
    - 年月分组：DATE_TRUNC('month', CAST("日期" AS DATE))
    - 日期筛选：WHERE "日期" >= '2024-01-01'
-5. 文本匹配使用：WHERE "摘要" LIKE '%关键词%'
-6. 聚合函数：SUM, COUNT, AVG, MAX, MIN
-7. 分组使用 GROUP BY，排序使用 ORDER BY
-8. **不要使用 LIMIT**，查询结果不限制行数，返回所有匹配记录
-9. 有科目余额表时可以用 JOIN：FROM "data" d JOIN "balance_data" b ON ...
-10. **保持 SQL 简洁**：能用简单条件表达的就不要写子查询。例如周末判断直接用 `EXTRACT(DOW FROM CAST("日期" AS DATE)) IN (0, 6)`，不要生成日期序列表。
-11. **注意：如果查询中的关键词包含括号同义词标注，如"交易(transaction/txn)"，括号内是对主词的说明，只需对主词（如"交易"）生成 LIKE 条件即可，不需要对括号内每个词单独生成条件。**
+6. 文本匹配使用：WHERE "摘要" LIKE '%关键词%'
+7. 聚合函数：SUM, COUNT, AVG, MAX, MIN
+8. 分组使用 GROUP BY，排序使用 ORDER BY
+9. **不要使用 LIMIT**，查询结果不限制行数，返回所有匹配记录
+10. 有科目余额表时可以用 JOIN：FROM "data" d JOIN "balance_data" b ON ...
+11. **保持 SQL 简洁**：能用简单条件表达的就不要写子查询。例如周末判断直接用 `EXTRACT(DOW FROM CAST("日期" AS DATE)) IN (0, 6)`，不要生成日期序列表。
+12. **注意：如果查询中的关键词包含括号同义词标注，如"交易(transaction/txn)"，括号内是对主词的说明，只需对主词（如"交易"）生成 LIKE 条件即可，不需要对括号内每个词单独生成条件。**
 
 ## 输出要求
 请只返回 SQL 代码，不要包含解释或额外文本。SQL 必须完整且可执行。
