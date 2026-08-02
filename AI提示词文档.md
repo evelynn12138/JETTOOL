@@ -1,6 +1,6 @@
 # AI 提示词文档
 
-本应用中共有 **9 个 AI 调用场景**，按功能模块分类整理如下。
+本应用中共有 **8 个 AI 调用场景**，按功能模块分类整理如下。
 
 ---
 
@@ -60,45 +60,7 @@
 
 ## 二、完整性与核对
 
-### 2. 完整性测试 AI 引导助手（`app.py` — `INTEGRITY_SYSTEM_PROMPT`）
-
-**用途**：引导用户配置完整性测试参数并执行测试的导向式对话助手。
-
-**System prompt**（完整版，约 80 行）：
-```
-你是"完整性测试助手"，担任用户的审计数据完整性测试向导。
-
-## 你的角色
-你不是简单的工具执行器，而是引导用户一步步完成完整性测试配置的审计顾问。
-
-## 引导流程（必须按顺序）
-### 第一步：开场 + 查询数据状态
-### 第二步：了解数据来源（SAP/用友/金蝶等）
-### 第三步：询问借正贷负（方向调整）
-### 第四步：询问反结转
-### 第五步：询问末级科目
-### 第六步：询问剔除规则
-### 第七步：汇总确认
-### 第八步：解读结果
-
-## 工具使用规则
-1. get_session_info：每次对话开始时必须先调用
-2. run_all_tests：所有配置收集完毕后统一调用
-3. check_journal / check_balance / cross_validate：单独运行
-4. get_cf_info / get_leaf_info：用户询问细节时使用
-5. export_report：导出报告时使用
-
-## 禁止行为
-1. 禁止编造工具返回数据
-2. 禁止声称生成了文件或下载链接
-3. 禁止自行编造测试配置
-```
-
-**触发方式**：通过 Function Calling（tools 参数），定义 8 个工具，支持多轮对话。
-
----
-
-### 3. 完整性测试 AI 差异分析（`app.py` — `api_integrity_test_ai_analyze`）
+### 2. 完整性测试 AI 差异分析（`app.py` — `api_integrity_test_ai_analyze`）
 
 **用途**：完整性测试完成后，对异常结果进行审计视角的分析。
 
@@ -146,7 +108,7 @@
 
 ---
 
-### 4. 科目余额表核对 AI 差异分析（`app.py` — `api_report_reconciliation_ai_analyze`）
+### 3. 科目余额表核对 AI 差异分析（`app.py` — `api_report_reconciliation_ai_analyze`）
 
 **用途**：报表核对完成后，分析差异模式、发现映射调换等。
 
@@ -180,7 +142,7 @@
 
 ---
 
-### 5. 科目映射 AI 兜底（`modules/report_reconciliation.py` — `_ai_fallback`）
+### 4. 科目映射 AI 兜底（`modules/report_reconciliation.py` — `_ai_fallback`）
 
 **用途**：规则引擎无法匹配的科目，发给 AI 补全映射。
 
@@ -214,7 +176,7 @@
 
 ## 三、智能查询
 
-### 6. AI 生成 DuckDB SQL（`modules/ai_codegen.py` — `generate`）
+### 5. AI 生成 DuckDB SQL（`modules/ai_codegen.py` — `generate`）
 
 **用途**：用户输入自然语言查询，AI 生成可执行的 DuckDB SQL。
 
@@ -266,7 +228,7 @@
 
 ---
 
-### 7. SQL 解释（`modules/ai_codegen.py` — `explain_code`）
+### 6. SQL 解释（`modules/ai_codegen.py` — `explain_code`）
 
 **用途**：对生成的 SQL 进行逐行解释。
 
@@ -293,7 +255,7 @@ SELECT ... FROM "data" WHERE ...
 
 ---
 
-### 8. 查询语义优化（`modules/ai_codegen.py` — `optimize_query`）
+### 7. 查询语义优化（`modules/ai_codegen.py` — `optimize_query`）
 
 **用途**：将模糊的自然语言查询优化为更具体、可搜索的表达。
 
@@ -335,7 +297,7 @@ SELECT ... FROM "data" WHERE ...
 
 ---
 
-### 9. AI SQL 复核（`app.py` — `api_review_code`）
+### 8. AI SQL 复核（`app.py` — `api_review_code`）
 
 **用途**：使用第二 AI 模型审查生成的 SQL 的语法、安全、意图、性能。
 
@@ -386,7 +348,7 @@ SELECT ... FROM "data" ...
 
 ## 四、字段映射
 
-### 10. AI 智能字段映射（`app.py` — `auto_map_fields`）
+### 9. AI 智能字段映射（`app.py` — `auto_map_fields`）
 
 **用途**：根据列名、数据类型和样本值自动推荐字段映射。
 
@@ -431,7 +393,6 @@ SELECT ... FROM "data" ...
 | 场景 | temperature | max_tokens | timeout |
 |------|------------|------------|---------|
 | 报表结构识别 | 0.1 | 2000 | 30s |
-| 完整性测试助手 | — | —（多轮对话） | — |
 | 完整性差异分析 | 0.3 | 2000 | 30s |
 | 核对差异分析 | 0.2 | 2000 | 30s |
 | 科目映射兜底 | 0.1 | 2000 | 30s |

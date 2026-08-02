@@ -6,12 +6,12 @@ DA数据清洗业务AI应用是一个基于 Flask 的本地财务数据查询分
 
 **技术栈：**
 - 后端：Flask 3.0 + Flask-Session（服务端文件存储）
-- 数据处理：DuckDB + Pandas 2.1
-- AI 接口：Dify Workflow API（Qwen3），支持 env DEEPSEEK_API_KEY 降级 Direct API
+- 数据处理：DuckDB + Pandas 2.1（pandas 仅用于上传预览 / Excel 桥接）
+- AI 接口：Dify Workflow API（DifyClient），无降级
 - SQL 生成：AI 生成 DuckDB SQL，本地引擎执行
 - 财务报表清洗：AI 识别结构（读前 10 行）+ 规则引擎提取（无二次 AI 调用）
 - 科目余额表核对：规则映射引擎 + 模糊匹配 + 贪心爬山优化 + AI 差异分析
-- 数据加密：Fernet 对称加密（API Key 存储）
+- 数据加密：Fernet 加密 Dify API Key（enc: 前缀）+ 独立 secret_key 文件
 - Excel 读写：openpyxl 3.1
 - 前端：原生 HTML/CSS/JS（无前端框架），CodeMirror 代码编辑器
 - 桌面端：PyInstaller 打包 Windows .exe（GitHub Actions）
@@ -23,16 +23,18 @@ DA数据清洗业务AI应用是一个基于 Flask 的本地财务数据查询分
 ```
 DA数据清洗业务AI应用/
 ├── app.py                          # Flask 主应用（路由 + 会话管理 + 业务编排）
-├── config.py                       # 全局配置（AI 供应商、Secret Key、上传限制）
+├── config.py                       # 全局配置（SECRET_KEY 来源识别、Dify key 解密、bundle 密钥源、上传限制）
 ├── requirements.txt                # Python 依赖
 ├── start.sh                        # 快速启动脚本
 ├── TECHNICAL.md                    # 本文件
 │
 ├── modules/                        # 核心业务模块
 │   ├── __init__.py
-│   ├── data_processor.py           # DataProcessor - Excel/CSV 加载分析
+│   ├── data_processor.py           # DataProcessor - 仅上传预览残留（sheet 探测/原始行预览）
+│   ├── analysis_engine.py          # AnalysisEngine - DuckDB 上传分析（临时表，CSV 只读一次）
 │   ├── duckdb_engine.py            # DuckDBEngine - DuckDB 封装（建表/查询/导出）
-│   ├── ai_codegen.py               # AICodeGenerator - AI SQL 生成
+│   ├── ai_codegen.py               # AICodeGenerator - AI SQL 生成（经 Dify 代理调用）
+│   ├── dify_client.py              # DifyClient - Dify Workflow API 封装
 │   ├── integrity_checker.py        # IntegrityChecker - DuckDB SQL 完整性测试
 │   ├── report_cleaner.py           # ReportCleaner - 财务报表清洗（AI 结构识别 + 规则提取）
 │   ├── report_reconciliation.py    # ReconciliationEngine - 科目余额表↔报表核对
@@ -41,7 +43,7 @@ DA数据清洗业务AI应用/
 │   ├── preset_rules.py             # 筛选规则包管理系统
 │   ├── sampling.py                 # 审计抽样模块
 │   ├── audit_trail.py              # 审计轨迹（操作日志）
-│   ├── crypto_utils.py             # API Key 加密/解密（Fernet）
+│   ├── crypto_utils.py             # Dify key 加密/解密（Fernet，密钥派生自 SECRET_KEY）
 │   └── utils.py                    # 工具函数
 │
 ├── templates/                      # Jinja2 页面模板（5 步流程 + 扩展功能）
@@ -58,7 +60,14 @@ DA数据清洗业务AI应用/
 │   └── js/report-cleaner.js        # 报表清洗 + 核对 + 优化前端逻辑
 │
 ├── electron/                       # Electron 桌面包装
-│   └── main.js
+│   ├── main.js
+│   └── build.js                    # 构建（复制 dify_bundle.enc）
+│
+├── tools/                          # 构建辅助工具
+│   ├── make_bundle.py              # 生成 dify_bundle.enc（打包注入 Dify key，零配置）
+│   └── encrypt_env.py              # 将 .env 中的 Dify key 加密为 enc: 密文
+│
+├── dify_bundle.enc                 # 加密 Dify key bundle（gitignore，随 exe 注入）
 │
 ├── temp/                           # 上传文件存储目录（自动创建）
 ├── flask_session/                  # Flask-Session 文件存储目录（自动创建）
@@ -86,12 +95,11 @@ DA数据清洗业务AI应用/
 - 上传序时账：`POST /api/upload` → 存储在 `session['data_info']`
 - 上传科目余额表（可选）：`POST /api/upload-balance` → 存储在 `session['balance_data_info']`
 - **增强功能**：支持选择 Sheet 页、自定义表头行号、预览前 5 行
-- 关键操作：`DataProcessor.process()` 加载文件前 100 行进行分析，识别字段类型（text/number/date），生成预览数据
+- 关键操作：`AnalysisEngine.analyze_all()` 将文件加载到 DuckDB 临时表（CSV 只读一次），识别字段类型（text/number/date），生成预览数据
 
 ### 第 2 步：字段映射（原 API 配置步骤已移除）
-- API 配置已移除，改为硬编码 Dify Workflow API（config.py 中 DIFY_MAIN_* / DIFY_REVIEW_*）
-- 可通过环境变量 `DEEPSEEK_API_KEY` 降级为 Direct API 调用
-- 支持自定义模型和 API 地址：`DIRECT_MODEL`、`DIRECT_API_URL`
+- API 配置已移除，Dify key 由 config.py 解密（enc: 前缀 Fernet 密文），无用户配置、无降级
+- 所有 AI 调用（智能映射等）均经 DifyClient 走 Dify Workflow
 
 ### 第 3 步：字段映射
 - 前端将文件原始字段映射到标准字段（11 个序时账字段 + 科目余额表字段）
@@ -112,12 +120,6 @@ DA数据清洗业务AI应用/
 - 支持反结转模式（reverse_carry_forward）和末级科目模式（leaf_accounts）
 - 运行后在 DuckDB 创建 `balance_integrity` 快照表（快照在 `finally` 清理前完成，保留处理后的数据）
 - 结果可导出为 Excel：`POST /api/integrity-test/export`
-- **AI 引导式问答助手**：内置导向式决策树对话流程
-  - AI 引导用户确认：ERP 系统、方向调整、反结转、末级科目、排除规则
-  - 根据用户反馈动态调用工具执行测试
-  - 支持对话中导出测试报告（PDF 格式的报告摘要 + Excel 文件下载）
-  - 历史对话在重新导入数据时自动清除（`session.pop('integrity_chat_history')`）
-  - 端点：`POST /integrity-chat`
 
 #### 4b. 财务报表清洗
 - 上传资产负债表/利润表（`.xlsx` / `.xls`），支持导入多张报表
@@ -148,23 +150,25 @@ DA数据清洗业务AI应用/
 
 ## 四、核心模块详解
 
-### 4.1 DataProcessor（`modules/data_processor.py`）
+### 4.1 AnalysisEngine（`modules/analysis_engine.py`）— DuckDB 版上传分析
 
 ```python
-class DataProcessor:
-    def __init__(self, filepath: str)
-    def load_data(self, sheet_name=None, header_row=None, nrows=None) -> pd.DataFrame
-    def get_total_rows(self) -> int
-    def analyze_columns(self) -> List[Dict]
-    def get_preview_data(self, rows: int = 5) -> List[Dict]
-    def process(self, sheet_name=None, header_row=None) -> Dict
-    def clean_data(self, df: pd.DataFrame) -> pd.DataFrame
+class AnalysisEngine:
+    def __init__(self, filepath: str, conn: duckdb.DuckDBPyConnection, csv_dir: str)
+    def get_total_rows(self, sheet_name=None, header_row=None) -> int
+    def get_preview_data(self, n: int = 5, sheet_name=None, header_row=None) -> List[Dict]
+    def analyze_columns(self, n_sample: int = 100, sheet_name=None, header_row=None) -> List[Dict]
+    def analyze_all(self, n_sample: int = 100, sheet_name=None, header_row=None) -> Dict
+    def cleanup(self)
 ```
 
-- `load_data()`：加载 Excel 或 CSV（自动尝试 utf-8-sig → utf-8 → gbk → gb2312 → latin1 → cp1252）
-- 支持指定 sheet_name 和 header_row（0-indexed）
-- `analyze_columns()`：检测每列类型（text/number/date），基于样本和关键词匹配
-- `clean_data()`：bool 列转字符串，数值 NaN 填充 0，对象列填充空字符串
+- 替代 `DataProcessor.process()` + pandas 的上传分析阶段（`/api/upload`、`/api/upload-balance`）
+- **CSV 只读一次**：加载到 DuckDB 临时表（`_load_table()`），总行数 / 列分析 / 预览全部查临时表，不复读文件
+- **GBK 编码**：DuckDB 不支持 GBK，`_detect_encoding()` 检测到 GBK 先转 UTF-8（`_ensure_utf8_csv()`）再交给 DuckDB
+- **XLSX 桥接**：`_xlsx_to_temp_csv()` 用 openpyxl 流式读取写入临时 CSV（路径缓存到 `session['xlsx_temp_csv']` 供导入复用）
+- `analyze_columns()`：取前 N 行样本，在 Python 层计算列类型（text/number/date）与关键词匹配，避免逐列 SQL
+- `analyze_all()`：一键返回 `total_rows` + `fields` + `preview`，数据只读一次
+- DataProcessor 仅保留上传预览残留（`get_xlsx_sheet_names()` / `preview_raw()`，供 `/api/upload/preview`）
 
 ### 4.2 DuckDBEngine（`modules/duckdb_engine.py`）
 
@@ -188,8 +192,7 @@ class DuckDBEngine:
 
 ```python
 class AICodeGenerator:
-    def __init__(self, api_key: str, provider: str = "deepseek",
-                 api_url: str = None, model: str = None)
+    def __init__(self, dify_client=None)
     def generate(self, query: str, fields_info: List[Dict],
                  data_preview: Optional[List[Dict]]) -> str
     def explain_code(self, sql: str) -> str
@@ -197,6 +200,7 @@ class AICodeGenerator:
     def test_generation(self, sample_query: str = None) -> Tuple[bool, str]
 ```
 
+- 通过 DifyClient 代理调用 Dify Workflow（无直连 / 降级分支）
 - 构建提示词时将字段信息、数据预览传入 AI
 - 严格限制只生成 SELECT 查询
 - `_validate_sql()`：检查 SQL 是否以 SELECT/WITH 开头
@@ -245,7 +249,7 @@ class ReportCleaner:
     def __init__(self)
     def load_file(self, filepath: str) -> list      # 加载 xlsx/xls，返回 sheet 列表
     def preview_raw(self, sheet_name, nrows=10)      # 取前 N 行原始数据
-    def ai_detect(self, sheet_name, api_key, ...)    # AI 读前 10 行，识别报表结构
+    def ai_detect(self, sheet_name, dify_client, ...)  # AI 读前 10 行，识别报表结构
     def extract_by_meta(self, sheet_name, meta)       # 规则引擎提取清洗数据
     def export_to_excel(self, sheet_name, meta)       # 导出清洗后数据为 xlsx
 ```
@@ -272,7 +276,7 @@ class ReportCleaner:
 ```python
 class ReconciliationEngine:
     def __init__(self, db_cursor, balance_fields, balance_table='balance_data')
-    def get_balance_mappings(self, report_data, api_key=None)  # 返回映射数据供前端编辑
+    def get_balance_mappings(self, report_data, dify_client=None)  # 返回映射数据供前端编辑
     def reconcile_with_mappings(self, mappings, report_data)    # 按用户映射重新计算差异
 ```
 
@@ -298,40 +302,7 @@ class ReconciliationEngine:
 - 完整性测试运行后会自动创建 `balance_integrity` 快照表
 - 核对优先使用快照表（含反结转调整后的期末余额），兜底原始 `balance_data`
 
-### 4.5 AI 完整性测试助手（`app.py` — `integrity_chat` 路由）
-
-**位置**：`POST /integrity-chat`（位于 `app.py`，非独立模块）
-
-**技术特点：**
-- 使用 OpenAI-compatible Function Calling（tools 参数）驱动多轮对话
-- 最大 5 轮 tool-calling 递归
-- 定义 8 个 `INTEGRITY_TOOLS`：
-  1. `run_all_tests` — 执行全部 3 项测试（可选参数：方向调整、排除规则、反结转、末级科目）
-  2. `get_journal_analysis` — 序时账单项分析
-  3. `get_balance_analysis` — 余额表单项分析
-  4. `run_cross_validation` — 交叉验证
-  5. `export_report` — 导出完整报告为 Excel（base64 嵌入返回）
-  6. `get_session_info` — 获取当前会话配置（字段映射、balance_format、AI 供应商等）
-  7. `set_exclusions` — 设置排除规则
-  8. `get_test_info` — 获取测试结果摘要
-
-**导向式决策树工作流（`INTEGRITY_SYSTEM_PROMPT`）：**
-1. 欢迎并获取会话信息
-2. 询问 ERP 系统类型（影响方向调整判断）
-3. 询问是否做方向调整
-4. 询问反结转模式
-5. 询问末级科目模式
-6. 询问排除规则（空凭证编号、合计行等）
-7. 执行自定义配置的全面测试
-8. 展示结果并询问是否需要导出或深入分析
-
-**防幻觉机制：**
-- `export_report` 实际调用 DuckDB 重新计算全量明细生成 Excel（不依赖缓存）
-- 后端兜底：检测用户含"导出/报告/下载"关键词但 AI 未调工具时，强制导出
-- 成功导出后 AI 回复被固定为"报告已生成，请点击下载"（杜绝 AI 虚构下载链接）
-- 工具调用前自动重建 trim/direction 临时视图（`CREATE OR REPLACE TEMP VIEW`）
-
-### 4.6 同义词词典（`modules/synonym_dict.py`）
+### 4.7 同义词词典（`modules/synonym_dict.py`）
 
 ```python
 SYNONYM_MAP = {
@@ -353,9 +324,9 @@ def expand_keywords(text: str) -> str
 ### 4.8 其他模块
 
 **`crypto_utils.py`**：
-- 使用 `cryptography.fernet.Fernet` 对称加密
+- 使用 `cryptography.fernet.Fernet` 对称加密，密钥由 SECRET_KEY（sha256）派生
 - `encrypt(plain, key)` / `decrypt(cipher, key)`
-- 用于 API Key 在 session 中的安全存储
+- 用于 Dify API Key 的加密（`enc:` 前缀密文），解密在 `config.py` 完成
 
 **`mapping_history.py`**：
 - `save_mapping(field_mapping, user_fields, session)` — 保存映射历史到 session
@@ -411,21 +382,20 @@ def expand_keywords(text: str) -> str
 | `balance_format` | str | 科目余额表格式 `'calculated'` 或 `'debit_credit'` |
 | `balance_field_mapping` | dict | 科目余额表字段映射 |
 | `balance_upload_options` | dict | 科目余额表上传配置 |
-| `api_key` | str | 加密后的 API Key（主模型） |
-| `ai_provider` | str | AI 供应商 ID（主模型） |
-| `ai_model` | str | AI 模型名（主模型） |
-| `review_api_key` | str | 加密后的复核模型 API Key（可选） |
-| `review_provider` | str | 复核模型供应商 ID |
-| `review_model` | str | 复核模型名 |
-| `review_api_url` | str | 复核模型自定义 API 地址 |
 | `integrity_results` | dict | 完整性测试结果 |
 | `report_filepath` | str | 财务报表文件路径（临时会话） |
 | `balance_integrity` | table | (DuckDB) 完整性测试后快照的科目余额表，含反结转调整 |
-| `integrity_chat_history` | list | 问答助手的多轮对话历史（`[{role, content}]`） |
 | `last_execution_result` | dict | 上次查询执行结果 |
 | `query_history` | list | 查询历史记录 |
 | `manual_fills` | dict | 手动填充的常量列 |
 | `mapping_history` | list | 字段映射历史 |
+| `duckdb_imported` | bool | 数据是否已导入 DuckDB（data / balance_data 表） |
+| `saved_queries` | list | 收藏的查询（query_text + sql_code） |
+| `xlsx_temp_csv` | str | XLSX 转出的临时 CSV 路径（供导入复用） |
+| `report_clean_data` | dict | 财务报表清洗结果 |
+| `pending_filepath` | str | 上传预览待确认的文件路径 |
+| `pending_filename` | str | 上传预览待确认的文件名 |
+| `last_query_info` | dict | 上次查询信息（query_text, sql_code） |
 
 ---
 
@@ -443,7 +413,7 @@ flowchart TB
     end
 
     subgraph 导入层["📥 导入与映射"]
-        B1["DataProcessor<br/>加载Excel/CSV<br/>自动检测编码"]
+        B1["AnalysisEngine<br/>加载Excel/CSV<br/>DuckDB临时表"]
         B2["字段映射<br/>智能推荐+手动<br/>标准字段对齐"]
         B3["DuckDB 导入<br/>data / balance_data<br/>借贷方自动计算余额"]
     end
@@ -649,16 +619,16 @@ flowchart LR
 | GET | `/` | 首页（重定向到 upload） |
 | GET | `/intro` | 产品介绍页 |
 | GET | `/upload` | 上传页面（含 sheet 选择 / 表头行配置） |
-| GET | `/api-config` | API 配置页面（多供应商支持） |
-| GET | `/field-mapper` | 字段映射页面（需已配置 API Key） |
+| GET | `/api-config` | 已废弃（302 重定向到 /field-mapper） |
+| GET | `/field-mapper` | 字段映射页面（含序时账 + 科目余额表） |
+| GET | `/balance-mapper` | 科目余额表映射（302 重定向到 /field-mapper） |
 | GET | `/integrity-test` | 完整性测试页面 |
 | GET | `/query` | 查询分析页面 |
-| POST | `/api/upload` | 上传序时账文件，调用 `DataProcessor.process()` |
-| POST | `/api/upload-balance` | 上传科目余额表文件 |
+| POST | `/api/upload` | 上传序时账文件，调用 AnalysisEngine 分析（DuckDB 临时表，CSV 只读一次） |
+| POST | `/api/upload-balance` | 上传科目余额表文件（AnalysisEngine 分析） |
 | POST | `/api/upload/preview` | 上传预览（检测 sheet 和原始行） |
 | POST | `/api/configure-fields` | 保存字段映射 → 导入 DuckDB |
 | POST | `/api/configure-balance-fields` | 保存科目余额表字段映射 |
-| POST | `/api/configure-api` | 保存 API Key（加密后存 session） |
 | POST | `/api/auto-map-fields` | **AI 智能映射** — 自动推荐字段映射 |
 | POST | `/api/generate-code` | AI 生成 DuckDB SQL |
 | POST | `/api/review-code` | **复核 SQL** — 第二 AI 模型审查语法/安全/意图/性能 |
@@ -667,23 +637,30 @@ flowchart LR
 | POST | `/api/execute` | 执行 SQL（DuckDB 引擎） |
 | POST | `/api/export` | 导出结果为 CSV/Excel |
 | GET | `/api/query-history` | 获取查询历史 |
+| GET / POST | `/api/saved-queries` | 收藏查询（列表 / 新增） |
+| DELETE | `/api/saved-queries/<qid>` | 删除收藏查询 |
 | POST | `/api/integrity-test/run` | 运行完整性测试（支持反结转/末级科目模式） |
 | GET | `/api/integrity-test/results` | 获取上次测试结果 |
 | POST | `/api/integrity-test/export` | 导出测试结果为 Excel（4 sheet） |
-| POST | `/integrity-chat` | 完整性测试 AI 引导问答（多轮对话，tool-calling 驱动） |
 | POST | `/api/integrity-test/ai-analyze` | AI 分析异常测试结果（审计视角） |
 | POST | `/api/report-upload` | 上传财务报表文件（xlsx/xls），返回 sheet 列表 |
 | POST | `/api/report-detect` | AI 识别报表结构（读前 10 行） |
 | POST | `/api/report-extract` | 规则提取清洗数据 |
 | POST | `/api/report-export` | 导出清洗后数据为 Excel |
+| GET | `/report-cleaner` | 报表清洗页面（302 重定向到 /integrity-test） |
 | POST | `/api/report-reconciliation` | 科目余额表核对（获取映射数据 / 刷新核算） |
 | POST | `/api/report-reconciliation/export` | 导出核对结果 Excel |
 | POST | `/api/report-reconciliation/ai-analyze` | AI 差异分析核对结果 |
+| POST | `/api/report-reconciliation/optimize` | 贪心爬山优化映射（最小化总差异） |
 | GET | `/api/mapping-history/check` | 检查是否有匹配的历史映射 |
 | POST | `/api/mapping-history/apply` | 应用历史映射 |
 | GET | `/api/preset-rules/packs` | 获取规则包列表 |
 | POST | `/api/preset-rules` | 保存自定义规则 |
 | DELETE | `/api/preset-rules/<id>` | 删除自定义规则 |
+| GET | `/api/sampling/methods` | 获取审计抽样方法列表 |
+| POST | `/api/sampling/execute` | 执行审计抽样 |
+| GET | `/api/debug/duckdb-info` | 调试：查看 DuckDB 表状态 |
+| GET | `/debug/setup-demo` | 调试：预置演示数据会话 |
 
 ---
 
@@ -713,7 +690,7 @@ execute_query()：DuckDB 本地执行
 - DuckDB 引擎仅执行 SELECT 查询（`_validate_sql()` 守卫）
 - SQL 前注入 `SET enforce_guarded_mode=true;`
 - 数据仅在内存中处理，无需网络传输
-- API Key 经 Fernet 加密后存 session
+- Dify key 由 config.py 解密（enc: 前缀 + SECRET_KEY），不存 session
 
 ### 查询优化（AI 语义增强）
 
@@ -750,7 +727,7 @@ SQL 生成后自动触发复核，流程如下：
     ↓ 自动触发
 POST /api/review-code
     ↓
-选用复核模型（独立配置或主模型回退）
+调用 Dify Review Workflow（硬编码，无用户配置）
     ↓
 构建 prompt（含查询语句、SQL、字段信息）
     ↓
@@ -765,11 +742,9 @@ POST /api/review-code
 3. **意图匹配** — SQL 逻辑是否准确反映用户查询需求
 4. **性能优化** — 是否有明显的性能问题
 
-**配置方式（API 配置页）：**
-- 可选展开"复核模型配置"区块
-- 可指定独立供应商/API Key/模型（方案 B）
-- 留空则复用主模型配置
-- 配置参数字段：`review_provider`、`review_api_key`、`review_model`、`review_api_url`
+**配置方式（硬编码）：**
+- Dify Review Workflow 硬编码（`DIFY_REVIEW_*` 配置），`has_review_config=True`，复核始终可用
+- 无 API 配置页、无用户可配置项
 
 **响应格式：**
 ```json
@@ -846,8 +821,6 @@ session['data_info'] = data_info  # 必须重新赋值
 
 ### 7. 字段映射页面路由守卫
 - 未上传数据 → 重定向到 `/upload`
-- 未配置 API Key → 重定向到 `/api-config`
-- 这是为了保护 AI 智能映射功能可用
 
 ### 8. 结转损益金额有三条路径，必须一致
 
@@ -864,8 +837,8 @@ session['data_info'] = data_info  # 必须重新赋值
 - 但仅汇总**单行匹配**（非整张凭证），且异步调用覆盖了路径 A 的正确值
 - ✅ 已删除此函数，统一使用路径 A 的 `carry_forward_info.cf_total_amount`
 
-**路径 C：Chat Assistant `export_report` 工具**
-- [`app.py:969`](app.py#L969) 调用 `checker.export_report()`
+**路径 C：`POST /api/integrity-test/export`**
+- 调用 `checker.export_report()` 重新计算全量明细，导出 4-sheet Excel
 - 复用 IntegrityChecker，与路径 A 完全一致
 
 **注意**：路径 A 的金额是"整张结转损益凭证"的合计数，大于仅匹配行的金额。这是因为结转账中通常包含多个科目行，只有部分行科目编号=4103，但整张凭证都应视为结转损益处理。
@@ -876,16 +849,13 @@ DuckDB 支持 `strftime`，但为了兼容性，代码生成器 `_fix_strftime()
 - `%Y-%m` → `CAST(DATE_TRUNC('month', CAST(col AS DATE)) AS VARCHAR)`
 - `%Y` → `CAST(EXTRACT(YEAR FROM CAST(col AS DATE)) AS VARCHAR)`
 
-### 10. 完整性助手视图冲突
-`integrity_chat` 多轮 tool-calling 中，多次调用会反复创建临时视图。解决方案：使用 `CREATE OR REPLACE TEMP VIEW` 替代 `CREATE TEMP VIEW`。
-
-### 11. 借贷方计算余额表的完整性测试
+### 10. 借贷方计算余额表的完整性测试
 当 `balance_format === 'debit_credit'` 时：
 - 导入时在 DuckDB 中 `ALTER TABLE ADD COLUMN` 计算 `期初余额 = 期初借方 - 期初贷方`，`期末余额 = 期末借方 - 期末贷方`
 - 方向调整不适用于计算出的余额（科目余额表没有借贷方方向，余额本身就是净额）
 - 余额表测试和交叉验证仍按标准字段名（期初余额/期末余额）即可执行
 
-### 12. 字段映射页面格式切换不生效的排查
+### 11. 字段映射页面格式切换不生效的排查
 `renderBalanceMapping` 定义在 `DOMContentLoaded` 回调内部，而 `onBalanceFormatChange` 从 radio button 的 `onchange` 属性调用，后者是全局函数无法访问回调内局部函数。解决方案：`onBalanceFormatChange` 直接调用全局 `renderMappingTable`。
 
 ---
@@ -938,13 +908,15 @@ lsof -ti:5003 | xargs kill -9
 在 Windows 电脑上操作：
 
 1. 安装 Python 3.9+（[python.org](https://www.python.org/downloads/)）
-2. 双击项目根目录的 `build_win.bat`
-3. 等待依赖安装和打包完成
-4. 在 `dist\DA数据清洗工具\` 找到 `DA数据清洗工具.exe`
+2. **打包前**运行 `python tools/make_bundle.py` 生成 `dify_bundle.enc`（内含加密 Dify key + 内置密钥，已 gitignore）
+3. 双击项目根目录的 `build_win.bat`（已配置 `--add-data "dify_bundle.enc;."` 注入 bundle）
+4. 等待依赖安装和打包完成
+5. 在 `dist\DA数据清洗工具\` 找到 `DA数据清洗工具.exe`（用户打开即用、零配置）
 
 ### 分发注意事项
 
 - `--windowed` 模式：不开命令行窗口，用户双击即用
+- **零配置**：Dify key 随 `dify_bundle.enc` 注入 exe，用户无需配置 API Key；GitHub CI 使用占位 bundle（不含真实 key），本地分发请用 `tools/make_bundle.py` 生成真实 bundle
 - 首次运行可能被 Windows Defender 拦截 → 点击"更多信息"→"仍要运行"
 - 数据存储在 `%USERPROFILE%\.da-cleaner\` 目录（session、上传文件、DuckDB 数据库）
 - macOS 打包：使用 `pyinstaller --windowed --add-data ... run.py`（路径分隔符用 `:`）
@@ -957,12 +929,12 @@ lsof -ti:5003 | xargs kill -9
 |------|------|------|
 | Flask | 3.0.0 | Web 框架 |
 | Flask-Session | 0.8.0 | 服务端会话存储（filesystem） |
-| duckdb | 1.0+ | 嵌入式 SQL 引擎 |
-| pandas | 2.1.4 | 数据处理（加载/清洗） |
+| duckdb | 1.2.1 | 嵌入式 SQL 引擎（上传分析/查询/完整性测试） |
+| pandas | 2.1.4 | 仅上传预览 / Excel 桥接 |
 | numpy | 1.26.0 | 数值计算 |
-| requests | 2.31.0 | 调用 AI API |
+| requests | 2.31.0 | 调用 Dify Workflow API |
 | openpyxl | 3.1.2 | Excel 读写 |
-| xlrd | 1.2.0 | 旧版 .xls 文件支持 |
-| cryptography | 41.0+ | API Key 加密（Fernet） |
+| xlrd | 2.0.1 | 旧版 .xls 文件支持 |
+| cryptography | 48.0.0 | Dify key 加密（Fernet） |
 | Werkzeug | 3.0.1 | Flask 依赖 |
 | python-dotenv | 1.0.0 | 环境变量加载 |
