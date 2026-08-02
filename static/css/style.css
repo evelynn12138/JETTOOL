@@ -790,6 +790,43 @@ body {
     opacity: 0.8;
 }
 
+/* ============ AI 生成内容免责声明 ============ */
+.ai-disclaimer {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 12px 0;
+    padding: 10px 14px;
+    background: rgba(59, 130, 246, 0.06);
+    border: 1px solid rgba(59, 130, 246, 0.20);
+    border-left: 4px solid #3b82f6;
+    border-radius: 4px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: #475569;
+}
+.ai-disclaimer > i {
+    font-size: 15px;
+    color: #3b82f6;
+    flex-shrink: 0;
+    margin-top: 3px;
+}
+.ai-disclaimer .ai-disclaimer-label {
+    font-weight: 600;
+    color: #1e40af;
+    margin-right: 4px;
+    white-space: nowrap;
+}
+.ai-disclaimer.ai-disclaimer-compact {
+    padding: 6px 10px;
+    font-size: 12px;
+    margin: 8px 0;
+    line-height: 1.6;
+}
+@media (max-width: 768px) {
+    .ai-disclaimer { font-size: 12px; }
+}
+
 /* 动画 */
 @keyframes slideDown {
     from {

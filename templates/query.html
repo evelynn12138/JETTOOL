@@ -197,6 +197,14 @@
                                 <li>复杂需求可以分步描述，AI 会逐步生成对应代码</li>
                             </ul>
                         </div>
+
+                        <div class="ai-disclaimer" role="note">
+                            <i class="fas fa-robot" aria-hidden="true"></i>
+                            <div>
+                                <span class="ai-disclaimer-label">AI 生成内容</span>
+                                本 SQL 由 AI 自动生成，仅供分析参考。请人工核对查询逻辑、取数口径与执行结果，确认无误后再导出或采信。
+                            </div>
+                        </div>
                     </div>
 
                     <div class="code-editor-card">
@@ -227,6 +235,13 @@
 
                             <div class="code-explanation" id="code-explanation" style="display: none;">
                                 <h4><i class="fas fa-info-circle"></i> 代码说明</h4>
+                                <div class="ai-disclaimer ai-disclaimer-compact" role="note">
+                                    <i class="fas fa-robot" aria-hidden="true"></i>
+                                    <div>
+                                        <span class="ai-disclaimer-label">AI 生成内容</span>
+                                        本代码说明由 AI 自动生成，仅作初步参考，请以实际代码逻辑为准。
+                                    </div>
+                                </div>
                                 <div class="explanation-content" id="explanation-content"></div>
                             </div>
                         </div>
@@ -242,6 +257,13 @@
                             <span class="review-toggle-icon" id="review-panel-icon">
                                 <i class="fas fa-chevron-right"></i>
                             </span>
+                        </div>
+                        <div class="ai-disclaimer ai-disclaimer-compact" role="note" style="margin:8px 12px 0;">
+                            <i class="fas fa-robot" aria-hidden="true"></i>
+                            <div>
+                                <span class="ai-disclaimer-label">AI 生成内容</span>
+                                本复核意见由 AI 自动生成，仅作初步参考，请结合业务实际判断后采信。
+                            </div>
                         </div>
                         <div class="review-body" id="review-body" style="display: none;">
                             <div class="review-loading" id="review-loading">
@@ -344,6 +366,13 @@
                         <button class="modal-close" id="optimize-modal-close">&times;</button>
                     </div>
                     <div class="modal-body">
+                        <div class="ai-disclaimer ai-disclaimer-compact" role="note">
+                            <i class="fas fa-robot" aria-hidden="true"></i>
+                            <div>
+                                <span class="ai-disclaimer-label">AI 生成内容</span>
+                                本优化建议由 AI 自动生成，仅供分析参考。请人工核对优化后的查询逻辑是否符合预期后再确认使用。
+                            </div>
+                        </div>
                         <div class="optimize-compare">
                             <div class="optimize-original">
                                 <h4><i class="fas fa-file-alt"></i> 原始查询</h4>

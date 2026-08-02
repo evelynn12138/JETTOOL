@@ -7,8 +7,8 @@
     # 1. 加载文件
     sheets = cleaner.load_file("path/to/file.xlsx")
 
-    # 2. AI 检测（读前 10 行）
-    meta = cleaner.ai_detect(sheet_name, api_key, provider="deepseek")
+    # 2. AI 检测（读前 10 行，通过 Dify 代理）
+    meta = cleaner.ai_detect(sheet_name, dify_client)
 
     # 3. 规则提取
     result = cleaner.extract_by_meta(sheet_name, meta)

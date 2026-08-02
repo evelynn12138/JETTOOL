@@ -56,6 +56,7 @@ pyinstaller ^
     --add-data "templates;templates" ^
     --add-data "static;static" ^
     --add-data "config.py;." ^
+    --add-data "dify_bundle.enc;." ^
     --hidden-import flask_session ^
     --hidden-import duckdb ^
     --hidden-import numpy ^

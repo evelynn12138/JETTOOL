@@ -36,9 +36,11 @@ const APP_SOURCES = [
   'config.py',
   'requirements.txt',
   '.env.example',
+  'dify_bundle.enc',
   { src: 'modules', dest: 'modules' },
   { src: 'templates', dest: 'templates' },
   { src: 'static', dest: 'static' },
+  { src: 'tools', dest: 'tools' },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────
@@ -147,11 +149,12 @@ function stepCopyApp() {
   rmrf(APP_DIST);
   mkdir(APP_DIST);
 
+  const OPTIONAL_FILES = new Set(['.env.example', 'dify_bundle.enc']);
   for (const item of APP_SOURCES) {
     if (typeof item === 'string') {
       const src = path.join(ROOT, item);
       const dest = path.join(APP_DIST, item);
-      if (!copy(src, dest) && item === '.env.example') {
+      if (!copy(src, dest) && OPTIONAL_FILES.has(item)) {
         // optional
       }
     } else {

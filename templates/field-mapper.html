@@ -97,6 +97,54 @@
         .filter-checkbox input[type="checkbox"] {
             cursor: pointer;
         }
+
+        /* 历史映射提示条 */
+        .history-match-banner {
+            margin: 0 0 20px;
+            border: 1px solid var(--yellow);
+            border-radius: 10px;
+            background: rgba(255, 231, 0, 0.08);
+            overflow: hidden;
+        }
+        .history-match-content {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 16px 20px;
+        }
+        .history-match-icon {
+            flex-shrink: 0;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(255, 231, 0, 0.18);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--yellow);
+            font-size: 18px;
+        }
+        .history-match-text {
+            flex: 1;
+        }
+        .history-match-text strong {
+            font-size: 15px;
+            color: var(--black);
+        }
+        .history-match-text p {
+            margin: 4px 0 0;
+            font-size: 13px;
+            color: #6b7280;
+        }
+        .history-match-actions {
+            flex-shrink: 0;
+            display: flex;
+            gap: 8px;
+        }
+        .history-match-actions .btn-small {
+            padding: 6px 14px;
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
@@ -134,6 +182,27 @@
         </header>
 
         <main class="main-content">
+            <!-- 历史映射提示条（检测到上次映射记录时显示） -->
+            <div class="history-match-banner" id="history-match-banner" style="display: none;">
+                <div class="history-match-content">
+                    <div class="history-match-icon">
+                        <i class="fas fa-history"></i>
+                    </div>
+                    <div class="history-match-text">
+                        <strong>检测到上次的映射记录</strong>
+                        <p>您上次上传的文件 <span id="history-filename"></span> 已有映射配置，是否直接应用？</p>
+                    </div>
+                    <div class="history-match-actions">
+                        <button class="btn btn-primary btn-small" id="history-apply-btn">
+                            <i class="fas fa-check"></i> 应用上次映射
+                        </button>
+                        <button class="btn btn-secondary btn-small" id="history-dismiss-btn">
+                            忽略
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <!-- ====== 序时账字段映射 ====== -->
             <div class="mapper-card">
                 <div class="mapper-header">
@@ -204,6 +273,13 @@
                                 <!-- 通过JavaScript动态生成 -->
                             </tbody>
                         </table>
+                    </div>
+                    <div class="ai-disclaimer" role="note">
+                        <i class="fas fa-robot" aria-hidden="true"></i>
+                        <div>
+                            <span class="ai-disclaimer-label">AI 生成内容</span>
+                            本字段映射由 AI 智能推荐，可能不完全符合实际业务。请在保存前逐项核对，重点关注科目编号、金额、借贷方向等关键字段。
+                        </div>
                     </div>
                     <div class="mapping-toolbar">
                         <button class="btn btn-small" id="ai-auto-map-btn" style="background: var(--yellow); color: var(--black); border: none;" onclick="aiAutoMap('journal', 'ai-auto-map-btn')">
@@ -295,6 +371,13 @@
                                 <!-- 通过JavaScript动态生成 -->
                             </tbody>
                         </table>
+                    </div>
+                    <div class="ai-disclaimer" role="note">
+                        <i class="fas fa-robot" aria-hidden="true"></i>
+                        <div>
+                            <span class="ai-disclaimer-label">AI 生成内容</span>
+                            本字段映射由 AI 智能推荐，可能不完全符合实际业务。请在保存前逐项核对，重点关注科目编号、金额、借贷方向等关键字段。
+                        </div>
                     </div>
                     <div class="mapping-toolbar">
                         <button class="btn btn-small" id="ai-auto-map-balance-btn" style="background: var(--yellow); color: var(--black); border: none;" onclick="aiAutoMap('balance', 'ai-auto-map-balance-btn')">
@@ -835,6 +918,9 @@
                 banner.className = 'history-prefill-banner';
                 banner.innerHTML = '<i class="fas fa-history"></i> 已自动加载上次映射关系，请确认无误后点击"保存映射并继续"';
                 document.querySelector('.mapper-card').insertBefore(banner, document.querySelector('.mapper-card .data-preview'));
+            } else {
+                // 未预填映射时，检测是否有历史映射记录可应用
+                checkMappingHistoryBanner();
             }
 
             // 渲染科目余额表映射
@@ -882,6 +968,45 @@
             document.getElementById('save-mapping-btn').addEventListener('click', saveMapping);
 
             // onclick 属性已绑定 aiAutoMap，此处不重复绑定
+        });
+
+        // ============ 历史映射检测（页面顶部提示条） ============
+        const historyBanner = document.getElementById('history-match-banner');
+        const historyFilename = document.getElementById('history-filename');
+        const historyApplyBtn = document.getElementById('history-apply-btn');
+        const historyDismissBtn = document.getElementById('history-dismiss-btn');
+
+        async function checkMappingHistoryBanner() {
+            try {
+                const response = await fetch('/api/mapping-history/check');
+                const result = await response.json();
+                if (result.has_match) {
+                    historyFilename.textContent = result.filename || '';
+                    historyBanner.style.display = 'block';
+                }
+            } catch (e) {
+                // 静默失败，不影响主流程
+            }
+        }
+
+        historyApplyBtn?.addEventListener('click', async () => {
+            try {
+                const response = await fetch('/api/mapping-history/apply', {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                if (result.success) {
+                    window.location.reload();
+                } else {
+                    alert('加载映射记录失败: ' + (result.error || '未知错误'));
+                }
+            } catch (e) {
+                alert('加载映射记录失败: ' + e.message);
+            }
+        });
+
+        historyDismissBtn?.addEventListener('click', () => {
+            historyBanner.style.display = 'none';
         });
     </script>
 </body>

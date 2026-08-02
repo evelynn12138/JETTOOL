@@ -48,3 +48,9 @@ venv/
 # Environment
 .env
 *.env.local
+
+# 加密密钥文件（与 .env 物理分离，不入库）
+secret_key
+
+# 打包分发用 bundle（含加密 Dify key + 密钥，打包时生成，不入库）
+dify_bundle.enc

@@ -7,32 +7,14 @@ import time
 class AICodeGenerator:
     """AI代码生成模块 - 通过 Dify 代理调用 AI 生成 DuckDB SQL"""
 
-    def __init__(self, dify_client=None, api_key: str = None,
-                 provider: str = "deepseek", api_url: str = None,
-                 model: str = None):
+    def __init__(self, dify_client=None):
         """
         初始化AI代码生成器
 
         Args:
-            dify_client: DifyClient 实例（优先使用）
-            api_key, provider, api_url, model: 旧版参数（dify_client 为 None 时使用）
+            dify_client: DifyClient 实例
         """
         self.dify_client = dify_client
-        self.api_key = api_key
-        self.provider = provider
-
-        # 加载供应商配置（兜底用，dify_client 为 None 时生效）
-        from config import Config
-        try:
-            api_url = Config.AI_PROVIDERS.get(provider, {}).get("api_url", "") if hasattr(Config, 'AI_PROVIDERS') else ""
-        except Exception:
-            api_url = ""
-        provider_config = {"api_url": api_url, "model": "deepseek-chat"}
-
-        self.api_url = api_url or provider_config["api_url"]
-        self.model = model or provider_config["model"]
-        self.temperature = 0.3
-        self.max_tokens = 2000
 
     def generate(self, query: str, fields_info: List[Dict[str, Any]],
                 data_preview: Optional[List[Dict]] = None) -> str:
@@ -133,7 +115,7 @@ class AICodeGenerator:
 
     def _call_api(self, prompt: str) -> str:
         """
-        调用 AI API（优先用 Dify 代理，兜底用直接 API）
+        调用 Dify 代理生成 SQL
 
         Args:
             prompt: 提示词
@@ -141,62 +123,14 @@ class AICodeGenerator:
         Returns:
             API响应内容
         """
-        # 优先使用 Dify 代理
-        if self.dify_client:
-            return self.dify_client.chat(
-                "你是一个专业的SQL数据分析专家，专门生成DuckDB SQL查询。",
-                prompt,
-                timeout=30,
-            )
+        if not self.dify_client:
+            raise Exception("Dify 代理未配置，无法调用 AI")
 
-        # 兜底：直接调用 OpenAI 兼容 API
-        if not self.api_key:
-            raise Exception("未配置 API Key")
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-
-        data = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": "你是一个专业的SQL数据分析专家，专门生成DuckDB SQL查询。"},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
-            "stream": False
-        }
-
-        try:
-            response = requests.post(
-                self.api_url,
-                headers=headers,
-                json=data,
-                timeout=30  # 30秒超时
-            )
-
-            if response.status_code != 200:
-                error_msg = f"API请求失败: {response.status_code}"
-                try:
-                    error_detail = response.json().get('error', {}).get('message', '未知错误')
-                    error_msg += f" - {error_detail}"
-                except Exception:
-                    pass
-                raise Exception(error_msg)
-
-            result = response.json()
-            content = result['choices'][0]['message']['content']
-
-            return content
-
-        except requests.exceptions.Timeout:
-            raise Exception("API请求超时，请稍后重试")
-        except requests.exceptions.ConnectionError:
-            raise Exception("网络连接失败，请检查网络设置")
-        except Exception as e:
-            raise Exception(f"API调用异常: {str(e)}")
+        return self.dify_client.chat(
+            "你是一个专业的SQL数据分析专家，专门生成DuckDB SQL查询。",
+            prompt,
+            timeout=30,
+        )
 
     def _extract_code(self, response_content: str) -> str:
         """从 API 响应中提取 SQL 代码"""
@@ -318,47 +252,15 @@ class AICodeGenerator:
 - 每行格式：{{代码行}} — {{一句话说明}}
 - 简洁，不要多余内容"""
 
-        # 优先使用 Dify 代理
-        if self.dify_client:
-            try:
-                return self.dify_client.chat(
-                    "你是一个专业的 SQL 解释器。",
-                    prompt,
-                    timeout=30,
-                ).strip()
-            except Exception:
-                return "解释生成失败。"
-
-        # 兜底：直接调用 OpenAI 兼容 API
-        if not self.api_key:
-            return "请先配置 API Key"
-
+        # 使用 Dify 代理
+        if not self.dify_client:
+            return "解释生成失败。"
         try:
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
-            data = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": "你是一个专业的 SQL 解释器。"},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.1,
-                "max_tokens": 500
-            }
-            response = requests.post(
-                self.api_url,
-                headers=headers,
-                json=data,
-                timeout=30
-            )
-            if response.status_code == 200:
-                result = response.json()
-                explanation = result['choices'][0]['message']['content']
-                return explanation.strip()
-            else:
-                return "无法生成 SQL 解释。"
+            return self.dify_client.chat(
+                "你是一个专业的 SQL 解释器。",
+                prompt,
+                timeout=30,
+            ).strip()
         except Exception:
             return "解释生成失败。"
 
@@ -410,56 +312,19 @@ class AICodeGenerator:
 
 优化后的查询:"""
 
-        # 优先使用 Dify 代理
-        if self.dify_client:
-            try:
-                optimized_query = self.dify_client.chat(
-                    '你是财务数据查询优化专家。把模糊概念变具体（月底→最后五天），扩展关键词的英文/缩写变体（调整→adj、adjustment），识别人名加拼音变体。不扩展字段名。',
-                    prompt,
-                    timeout=30,
-                ).strip()
-                optimized_query = optimized_query.replace('优化后的查询:', '').replace('优化查询:', '').strip()
-                return optimized_query
-            except Exception:
-                return query
-
-        if not self.api_key:
+        # 使用 Dify 代理
+        if not self.dify_client:
             return query
-
         try:
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
-
-            data = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": '你是财务数据查询优化专家。把模糊概念变具体（月底→最后五天），扩展关键词的英文/缩写变体（调整→adj、adjustment），识别人名加拼音变体。不扩展字段名。'},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.3,
-                "max_tokens": 800
-            }
-
-            response = requests.post(
-                self.api_url,
-                headers=headers,
-                json=data,
-                timeout=30
-            )
-
-            if response.status_code == 200:
-                result = response.json()
-                optimized_query = result['choices'][0]['message']['content'].strip()
-                # 清理响应内容，只保留查询语句
-                optimized_query = optimized_query.replace('优化后的查询:', '').replace('优化查询:', '').strip()
-                return optimized_query
-            else:
-                return query  # 如果失败，返回原始查询
-
+            optimized_query = self.dify_client.chat(
+                '你是财务数据查询优化专家。把模糊概念变具体（月底→最后五天），扩展关键词的英文/缩写变体（调整→adj、adjustment），识别人名加拼音变体。不扩展字段名。',
+                prompt,
+                timeout=30,
+            ).strip()
+            optimized_query = optimized_query.replace('优化后的查询:', '').replace('优化查询:', '').strip()
+            return optimized_query
         except Exception:
-            return query  # 如果失败，返回原始查询
+            return query
 
     def test_generation(self, sample_query: str = None) -> Tuple[bool, str]:
         """

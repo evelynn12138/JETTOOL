@@ -7,53 +7,6 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        .history-match-banner {
-            margin: 20px 0;
-            border: 1px solid var(--yellow);
-            border-radius: 10px;
-            background: rgba(255, 231, 0, 0.08);
-            overflow: hidden;
-        }
-        .history-match-content {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-            padding: 16px 20px;
-        }
-        .history-match-icon {
-            flex-shrink: 0;
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: rgba(255, 231, 0, 0.18);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--yellow);
-            font-size: 18px;
-        }
-        .history-match-text {
-            flex: 1;
-        }
-        .history-match-text strong {
-            font-size: 15px;
-            color: var(--black);
-        }
-        .history-match-text p {
-            margin: 4px 0 0;
-            font-size: 13px;
-            color: #6b7280;
-        }
-        .history-match-actions {
-            flex-shrink: 0;
-            display: flex;
-            gap: 8px;
-        }
-        .history-match-actions .btn-small {
-            padding: 6px 14px;
-            font-size: 13px;
-        }
-
         /* ============ 上传配置面板 ============ */
         .upload-config {
             margin-top: 16px;
@@ -244,27 +197,6 @@
                     <button class="btn btn-primary" id="journal-upload-btn" disabled style="margin-top: 16px;">
                         <i class="fas fa-upload"></i> 上传并解析
                     </button>
-                </div>
-            </div>
-
-            <!-- 历史映射提示条 -->
-            <div class="history-match-banner" id="history-match-banner" style="display: none;">
-                <div class="history-match-content">
-                    <div class="history-match-icon">
-                        <i class="fas fa-history"></i>
-                    </div>
-                    <div class="history-match-text">
-                        <strong>检测到上次的映射记录</strong>
-                        <p id="history-match-desc">您上次上传的文件 <span id="history-filename"></span> 已有映射配置，是否直接应用？</p>
-                    </div>
-                    <div class="history-match-actions">
-                        <button class="btn btn-primary btn-small" id="history-apply-btn">
-                            <i class="fas fa-check"></i> 应用上次映射
-                        </button>
-                        <button class="btn btn-secondary btn-small" id="history-dismiss-btn">
-                            忽略
-                        </button>
-                    </div>
                 </div>
             </div>
 
@@ -560,9 +492,6 @@
                     journalUploadMsg.textContent = '序时账解析成功 ✓';
                     journalUploadBtn.disabled = true;
                     updateContinueBtn();
-
-                    // 检查是否有历史映射
-                    checkMappingHistory(file.name);
                 } else {
                     alert('上传失败: ' + result.error);
                 }
@@ -903,48 +832,6 @@
             const i = Math.floor(Math.log(bytes) / Math.log(k));
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
-
-        // ============ 历史映射检测 ============
-        const historyBanner = document.getElementById('history-match-banner');
-        const historyFilename = document.getElementById('history-filename');
-        const historyApplyBtn = document.getElementById('history-apply-btn');
-        const historyDismissBtn = document.getElementById('history-dismiss-btn');
-
-        async function checkMappingHistory(filename) {
-            try {
-                const response = await fetch('/api/mapping-history/check');
-                const result = await response.json();
-                if (result.has_match) {
-                    historyFilename.textContent = filename;
-                    historyBanner.style.display = 'block';
-                }
-            } catch (e) {
-                // 静默失败，不影响主流程
-            }
-        }
-
-        historyApplyBtn.addEventListener('click', async () => {
-            try {
-                showLoading('正在加载上次映射...', '即将跳转到API配置页面');
-                const response = await fetch('/api/mapping-history/apply', {
-                    method: 'POST'
-                });
-                const result = await response.json();
-                if (result.success) {
-                    window.location.href = '/api-config';
-                } else {
-                    alert('加载映射记录失败: ' + (result.error || '未知错误'));
-                    hideLoading();
-                }
-            } catch (e) {
-                alert('加载映射记录失败: ' + e.message);
-                hideLoading();
-            }
-        });
-
-        historyDismissBtn.addEventListener('click', () => {
-            historyBanner.style.display = 'none';
-        });
     </script>
 </body>
 </html>

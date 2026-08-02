@@ -4,6 +4,12 @@
 
 cd "$(dirname "$0")"
 
+# 注入 SECRET_KEY（加密密钥）：从同级 secret_key 文件自动读取
+# 若已通过系统环境变量设置，则不覆盖
+if [ -z "$SECRET_KEY" ] && [ -f "$(dirname "$0")/secret_key" ]; then
+    export SECRET_KEY="$(cat "$(dirname "$0")/secret_key")"
+fi
+
 echo "=========================================="
 echo "  DA数据清洗业务AI应用"
 echo "=========================================="

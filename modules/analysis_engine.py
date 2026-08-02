@@ -39,24 +39,59 @@ def _detect_encoding(filepath: str) -> str:
     返回 DuckDB read_csv_auto 支持的编码名（utf-8 / latin-1 / utf-16）。
     GBK 文件返回 'gbk'，由外层做转换。
     """
+    # 读 8KB 采样（比之前 1KB 更不易在 UTF-8 多字节字符边界处截断）
     try:
         with open(filepath, 'rb') as f:
-            raw = f.read(1024)
-        # BOM 标记
-        if raw.startswith(b'\xef\xbb\xbf'):
-            return 'utf-8'
-        if raw.startswith(b'\xff\xfe') or raw.startswith(b'\xfe\xff'):
-            return 'utf-16'
-        # 依次尝试
-        for enc in ('utf-8', 'gbk', 'latin-1'):
-            try:
-                raw.decode(enc)
-                return enc
-            except UnicodeDecodeError:
-                continue
-        return 'latin-1'
+            raw = f.read(8192)
     except Exception:
         return 'utf-8'
+
+    # BOM 标记
+    if raw.startswith(b'\xef\xbb\xbf'):
+        return 'utf-8'
+    if raw.startswith(b'\xff\xfe') or raw.startswith(b'\xfe\xff'):
+        return 'utf-16'
+
+    # UTF-8 严格解码。若失败，可能是采样边界恰好截断了一个多字节字符：
+    # 从尾部逐步丢弃最多 3 字节（UTF-8 单字符最长 3 字节）再试，
+    # 能解则说明文件本身是 UTF-8，只是采样被截断。
+    def _is_utf8(b: bytes) -> bool:
+        try:
+            b.decode('utf-8')
+            return True
+        except UnicodeDecodeError:
+            for drop in (1, 2, 3):
+                if len(b) > drop:
+                    try:
+                        b[:-drop].decode('utf-8')
+                        return True
+                    except UnicodeDecodeError:
+                        continue
+            return False
+
+    if _is_utf8(raw):
+        return 'utf-8'
+
+    # GBK 严格解码（同样处理采样截断，GBK 单字符最长 2 字节）
+    def _is_gbk(b: bytes) -> bool:
+        try:
+            b.decode('gbk')
+            return True
+        except UnicodeDecodeError:
+            for drop in (1, 2):
+                if len(b) > drop:
+                    try:
+                        b[:-drop].decode('gbk')
+                        return True
+                    except UnicodeDecodeError:
+                        continue
+            return False
+
+    if _is_gbk(raw):
+        return 'gbk'
+
+    # latin-1 永远能解（单字节映射），作为最后兜底
+    return 'latin-1'
 
 
 def _ensure_utf8_csv(path: str) -> str:
@@ -150,22 +185,29 @@ class AnalysisEngine:
         self._tmp_table = None         # DuckDB 临时表名
         self._tmp_utf8_path = None     # GBK→UTF-8 转换路径
 
-    def _resolve_readable(self, sheet_name=None, header_row=None) -> str:
-        """返回可被 DuckDB read_csv_auto 读取的 CSV 路径。"""
+    def _resolve_readable(self, sheet_name=None, header_row=None):
+        """返回可被 DuckDB read_csv_auto 读取的 CSV 路径及已知编码。
+
+        返回 (csv_path, known_encoding)：
+        - XLSX 转出的临时 CSV 是程序用 UTF-8 写入的，known_encoding='utf-8'，
+          不需要再走检测，避免采样截断误判。
+        - CSV 文件需检测；GBK 文件先转 UTF-8，转后 known_encoding='utf-8'。
+        - 其余情况 known_encoding=None，由调用方自行检测。
+        """
         if self.ext == '.csv':
             path = self.filepath
             # GBK 编码转换
             if _detect_encoding(path) == 'gbk':
                 self._tmp_utf8_path = _ensure_utf8_csv(path)
-                return self._tmp_utf8_path
-            return path
+                return self._tmp_utf8_path, 'utf-8'
+            return path, None
         elif self.ext == '.xlsx':
             if not self.cached_csv_path or not os.path.exists(self.cached_csv_path):
                 self.cached_csv_path = _xlsx_to_temp_csv(
                     self.filepath, self.csv_dir,
                     sheet_name=sheet_name, header_row=header_row,
                 )
-            return self.cached_csv_path
+            return self.cached_csv_path, 'utf-8'
         else:
             raise ValueError(f"不支持的文件类型: {self.ext}")
 
@@ -177,10 +219,10 @@ class AnalysisEngine:
         if self._tmp_table:
             return self._tmp_table
 
-        csv_path = self._resolve_readable(sheet_name=sheet_name,
-                                          header_row=header_row)
+        csv_path, known_enc = self._resolve_readable(sheet_name=sheet_name,
+                                                     header_row=header_row)
         tbl = f"_analysis_{uuid.uuid4().hex[:8]}"
-        enc = _detect_encoding(csv_path)
+        enc = known_enc or _detect_encoding(csv_path)
         enc_clause = f"encoding='{enc}'" if enc in _DUCKDB_SUPPORTED_ENCODINGS else ""
 
         self.conn.execute(f"""
@@ -201,8 +243,9 @@ class AnalysisEngine:
             ).fetchone()
             return result[0] if result else 0
 
-        csv_path = self._resolve_readable(sheet_name=sheet_name, header_row=header_row)
-        enc = _detect_encoding(csv_path)
+        csv_path, known_enc = self._resolve_readable(sheet_name=sheet_name,
+                                                     header_row=header_row)
+        enc = known_enc or _detect_encoding(csv_path)
         enc_clause = f"encoding='{enc}'" if enc in _DUCKDB_SUPPORTED_ENCODINGS else ""
         result = self.conn.execute(
             f"SELECT COUNT(*) FROM read_csv_auto('{csv_path}', "
@@ -218,8 +261,9 @@ class AnalysisEngine:
                 f'SELECT * FROM "{self._tmp_table}" LIMIT {n}'
             )
         else:
-            csv_path = self._resolve_readable(sheet_name=sheet_name, header_row=header_row)
-            enc = _detect_encoding(csv_path)
+            csv_path, known_enc = self._resolve_readable(sheet_name=sheet_name,
+                                                         header_row=header_row)
+            enc = known_enc or _detect_encoding(csv_path)
             enc_clause = f"encoding='{enc}'" if enc in _DUCKDB_SUPPORTED_ENCODINGS else ""
             result = self.conn.execute(
                 f"SELECT * FROM read_csv_auto('{csv_path}', "

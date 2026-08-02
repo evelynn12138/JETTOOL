@@ -32,6 +32,13 @@ for f in "$SCRIPT_DIR/modules/"*.py; do
     [ -f "$f" ] && cp "$f" "$DIST_DIR/modules/"
 done
 
+# 复制工具脚本（加密工具等）
+echo "📦 复制工具脚本..."
+mkdir -p "$DIST_DIR/tools"
+for f in "$SCRIPT_DIR/tools/"*.py; do
+    [ -f "$f" ] && cp "$f" "$DIST_DIR/tools/"
+done
+
 # 复制模板
 echo "📦 复制模板..."
 mkdir -p "$DIST_DIR/templates"
@@ -78,8 +85,7 @@ DA数据清洗业务AI应用 - 使用说明
 📝 使用流程
   1. 上传财务数据文件 (.csv, .xlsx)
   2. 配置字段映射
-  3. 输入 DeepSeek API Key
-  4. 使用自然语言查询数据
+  3. 使用自然语言查询数据（AI 功能内置，无需配置）
 
 ❓ 常见问题
   - 端口被占用: 修改 config.py 中的端口号

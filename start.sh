@@ -4,6 +4,12 @@
 echo "DA数据清洗业务AI应用 - 快速启动"
 echo "========================================"
 
+# 注入 SECRET_KEY（加密密钥）：从同级 secret_key 文件自动读取
+# 若已通过系统环境变量设置，则不覆盖
+if [ -z "$SECRET_KEY" ] && [ -f "$(dirname "$0")/secret_key" ]; then
+    export SECRET_KEY="$(cat "$(dirname "$0")/secret_key")"
+fi
+
 # 检查Python
 if ! command -v python3 &> /dev/null; then
     echo "❌ 未找到Python3，请先安装Python3"
@@ -51,8 +57,7 @@ if curl -s http://localhost:5003/ > /dev/null 2>&1; then
     echo "📋 使用步骤:"
     echo "  1. 上传财务数据文件 (.csv, .xlsx)"
     echo "  2. 配置字段映射"
-    echo "  3. 输入DeepSeek API Key"
-    echo "  4. 使用自然语言查询数据"
+    echo "  3. 使用自然语言查询数据（AI 功能内置，无需配置）"
     echo ""
     echo "📊 测试文件:"
     echo "  - sample_finance_data.csv (示例数据)"
