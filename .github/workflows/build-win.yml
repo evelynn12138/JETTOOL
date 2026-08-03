@@ -60,6 +60,7 @@ jobs:
           # 生成真实 bundle：从 GitHub Secrets 读取 Dify key（私有仓库 Secrets，不入代码库）
           # 若 Secrets 未配置，则 key 为空（exe 不含 key，需用户另配）
           python -c "import json,os; json.dump({'secret':'bundled-secret-for-internal-dist','DIFY_MAIN_API_KEY':os.environ.get('DIFY_MAIN_API_KEY',''),'DIFY_REVIEW_API_KEY':os.environ.get('DIFY_REVIEW_API_KEY','')}, open('dify_bundle.enc','w'))"
+          python -c "import json,os; d=json.load(open('dify_bundle.enc')); mk=d.get('DIFY_MAIN_API_KEY',''); rk=d.get('DIFY_REVIEW_API_KEY',''); print('BUNDLE_CHECK main_set='+str(bool(mk))+' main_prefix='+(mk[:12] if mk else 'EMPTY')+' review_set='+str(bool(rk))+' review_prefix='+(rk[:12] if rk else 'EMPTY')+' exists='+str(os.path.exists('dify_bundle.enc')))"
           pyinstaller `
             --clean `
             --name "DA数据清洗工具" `
