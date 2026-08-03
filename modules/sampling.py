@@ -47,10 +47,28 @@ def get_methods() -> List[Dict[str, Any]]:
     ]
 
 
+def _safe_identifier(name: str) -> Optional[str]:
+    """校验并净化 SQL 标识符（列名/表名）。仅允许中英文、数字、下划线，否则返回 None。"""
+    import re
+    if not name or not isinstance(name, str):
+        return None
+    name = name.strip()
+    if not re.fullmatch(r'[A-Za-z0-9_一-龥]+', name):
+        return None
+    return name
+
+
 def generate_sql(method_id: str, params: Dict[str, str],
                  table_name: str = 'data') -> Optional[str]:
+    # 安全校验：表名/字段名必须是合法标识符，杜绝 SQL 注入
+    table_name = _safe_identifier(table_name)
+    if not table_name:
+        return None
+
     if method_id == 'monetary_unit_sampling':
-        amount_field = params.get('amount_field', '金额')
+        amount_field = _safe_identifier(params.get('amount_field', '金额'))
+        if not amount_field:
+            return None
         sample_size = int(params.get('sample_size', 50))
         return f'''
         SELECT * FROM (
@@ -71,7 +89,9 @@ def generate_sql(method_id: str, params: Dict[str, str],
 
     elif method_id == 'stratified_sampling':
         sample_size = int(params.get('sample_size', 100))
-        stratum_field = params.get('stratum_field', '科目名称')
+        stratum_field = _safe_identifier(params.get('stratum_field', '科目名称'))
+        if not stratum_field:
+            return None
         return f'''
         SELECT * FROM (
             SELECT *,
@@ -83,7 +103,9 @@ def generate_sql(method_id: str, params: Dict[str, str],
         '''
 
     elif method_id == 'directed_selection':
-        amount_field = params.get('amount_field', '金额')
+        amount_field = _safe_identifier(params.get('amount_field', '金额'))
+        if not amount_field:
+            return None
         min_amount = float(params.get('min_amount', 100000))
         max_count = int(params.get('max_count', 50))
         return f'''

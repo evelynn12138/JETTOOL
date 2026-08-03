@@ -57,12 +57,9 @@ class DifyClient:
             raise Exception(f"Dify 请求失败: {e}")
 
         if resp.status_code != 200:
-            try:
-                err_detail = resp.json()
-            except Exception:
-                err_detail = resp.text[:500]
+            # 只回显状态码，不把响应体细节（可能含提示词/数据）抛给上层/用户
             raise Exception(
-                f"Dify API 返回错误 ({resp.status_code}): {err_detail}"
+                f"Dify API 返回错误 (HTTP {resp.status_code})"
             )
 
         data = resp.json()

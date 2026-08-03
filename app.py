@@ -186,96 +186,6 @@ def index():
     """主页面"""
     return render_template('index.html')
 
-@app.route('/debug/setup-demo')
-def debug_setup_demo():
-    """临时：为截图预先配置会话数据"""
-    from modules.data_processor import DataProcessor
-
-    je_path = "/Users/evelynn/Desktop/EY AI/成都je.xlsx"
-    tb_path = "/Users/evelynn/Desktop/EY AI/成都tb.xlsx"
-
-    if os.path.exists(je_path):
-        p = DataProcessor(je_path)
-        session['filepath'] = je_path
-        session['data_info'] = p.process()
-
-    if os.path.exists(tb_path):
-        p = DataProcessor(tb_path)
-        session['balance_filepath'] = tb_path
-        session['balance_data_info'] = p.process()
-
-    session['field_mapping'] = {
-        "日期": "Effective Date",
-        "摘要": "JE Description",
-        "科目编号": "GL Account Number",
-        "科目名称": "GL Account Name",
-        "金额": "Functional Amount",
-        "凭证号": "JE NUMBER",
-        "公司名": "Business Unit Name",
-        "借方": "Functional Debit Amount",
-        "贷方": "Functional Credit Amount",
-        "部门": "Business Unit",
-        "制单人": "Preparer"
-    }
-    session['balance_field_mapping'] = {
-        "公司名": "Business Unit Name",
-        "科目编号": "GL Account Number",
-        "科目名称": "GL Account Name",
-        "期初余额": "期初",
-        "期末余额": "期末"
-    }
-
-    data_info = session.get('data_info', {})
-    if data_info:
-        rev = {v: k for k, v in session['field_mapping'].items()}
-        mapped = []
-        for f in data_info.get('fields', []):
-            fn = f.get('name', '')
-            if fn in rev:
-                mf = f.copy()
-                mf['name'] = rev[fn]
-                mf['original_name'] = fn
-                mapped.append(mf)
-            else:
-                mapped.append(f.copy())
-        data_info['mapped_fields'] = mapped
-        preview = data_info.get('preview', [])
-        if preview:
-            mp = []
-            for row in preview:
-                mr = {}
-                for k, v in row.items():
-                    mr[rev.get(k, k)] = v
-                mp.append(mr)
-            data_info['mapped_preview'] = mp
-        session['data_info'] = data_info
-
-    balance_info = session.get('balance_data_info', {})
-    if balance_info:
-        rev = {v: k for k, v in session['balance_field_mapping'].items()}
-        mapped = []
-        for f in balance_info.get('fields', []):
-            fn = f.get('name', '')
-            if fn in rev:
-                mf = f.copy()
-                mf['name'] = rev[fn]
-                mf['original_name'] = fn
-                mapped.append(mf)
-            else:
-                mapped.append(f.copy())
-        balance_info['mapped_fields'] = mapped
-        preview = balance_info.get('preview', [])
-        if preview:
-            mp = []
-            for row in preview:
-                mr = {}
-                for k, v in row.items():
-                    mr[rev.get(k, k)] = v
-                mp.append(mr)
-            balance_info['mapped_preview'] = mp
-        session['balance_data_info'] = balance_info
-
-    return redirect(url_for('field_mapper_page'))
 
 @app.route('/intro')
 def intro_page():
@@ -482,20 +392,26 @@ def upload_balance_file():
     if not allowed_file(file.filename):
         return jsonify({'success': False, 'error': '不支持的文件类型'})
 
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], 'balance_' + file.filename)
+    # secure_filename 防路径穿越，保留原扩展名，加 balance_ 前缀区分
+    _safe_name = secure_filename(file.filename) or 'upload'
+    if not os.path.splitext(_safe_name)[1]:
+        _ext = os.path.splitext(file.filename)[1].lower()
+        _safe_name += _ext
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], 'balance_' + _safe_name)
     file.save(filepath)
 
-    # 如果是 GBK 编码的 CSV，转换为 UTF-8（DuckDB 不支持 GBK）
+    # 如果是 GBK / GB18030 编码的 CSV，转换为 UTF-8（DuckDB 不支持这些编码）
     if os.path.splitext(filepath)[1].lower() == '.csv':
         from modules.analysis_engine import _detect_encoding
-        if _detect_encoding(filepath) == 'gbk':
+        _enc = _detect_encoding(filepath)
+        if _enc in ('gbk', 'gb18030'):
             tmp_utf8 = filepath + '.utf8'
-            with open(filepath, 'r', encoding='gbk') as fin, \
+            with open(filepath, 'r', encoding=_enc) as fin, \
                  open(tmp_utf8, 'w', encoding='utf-8', newline='') as fout:
                 import shutil
                 shutil.copyfileobj(fin, fout)
             os.replace(tmp_utf8, filepath)
-            app.logger.info(f"[UPLOAD] 科目余额表 CSV 已从 GBK 转换为 UTF-8: {filepath}")
+            app.logger.info(f"[UPLOAD] 科目余额表 CSV 已从 {_enc} 转换为 UTF-8: {filepath}")
 
     # 解析可选参数：sheet_name 和 header_row
     sheet_name = request.form.get('sheet_name') or None
@@ -577,11 +493,13 @@ def run_integrity_tests():
             try:
                 b_schema = {c['name'] for c in engine.get_schema(balance_table)}
                 if '币种' in b_schema:
+                    # 单引号转义防注入（'' 表示字面单引号）
+                    _cur_esc = currency_filter.replace("'", "''")
                     engine._conn.execute(f'DROP VIEW IF EXISTS "balance_currency_filtered"')
                     engine._conn.execute(f'''
                         CREATE TEMP VIEW "balance_currency_filtered" AS
                         SELECT * FROM "{balance_table}"
-                        WHERE CAST("币种" AS VARCHAR) = '{currency_filter}'
+                        WHERE CAST("币种" AS VARCHAR) = '{_cur_esc}'
                            OR "币种" IS NULL OR CAST("币种" AS VARCHAR) = ''
                     ''')
                     balance_table = 'balance_currency_filtered'
@@ -877,7 +795,8 @@ def ai_analyze_integrity():
                 if diff_records:
                     lines.append(f"差异明细（前 {min(10, len(diff_records))} 条，共 {details.get('difference_count', 0)} 条）：")
                     for r in diff_records[:10]:
-                        lines.append(f"  公司:{r.get('公司名','')} 科目:{r.get('科目编号','')} {r.get('科目名称','')}  序时账发生额:{r.get('序时账发生额',0)}  余额表发生额:{r.get('余额表发生额',0)}  差异:{r.get('差异',0)}")
+                        # 公司名脱敏（不发送具体公司标识），保留科目和差异值供分析
+                        lines.append(f"  科目:{r.get('科目编号','')} {r.get('科目名称','')}  序时账发生额:{r.get('序时账发生额',0)}  余额表发生额:{r.get('余额表发生额',0)}  差异:{r.get('差异',0)}")
             lines.append("")
 
         lines.extend([
@@ -1940,8 +1859,12 @@ def upload_file_preview():
         except Exception:
             pass
 
-    # 保存文件到临时路径
-    temp_filename = f"temp_{int(time.time())}_{file.filename}"
+    # 保存文件到临时路径（secure_filename 防路径穿越，保留原扩展名）
+    _safe_name = secure_filename(file.filename) or 'upload'
+    if not os.path.splitext(_safe_name)[1]:
+        _ext = os.path.splitext(file.filename)[1].lower()
+        _safe_name += _ext
+    temp_filename = f"temp_{int(time.time())}_{_safe_name}"
     temp_path = os.path.join(app.config['UPLOAD_FOLDER'], temp_filename)
     file.save(temp_path)
 
@@ -2021,21 +1944,26 @@ def upload_file():
     session.pop('field_mapping', None)
     session.pop('balance_field_mapping', None)
 
-    # 保存文件
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+    # 保存文件（secure_filename 防路径穿越，保留原扩展名）
+    _safe_name = secure_filename(file.filename) or 'upload'
+    if not os.path.splitext(_safe_name)[1]:
+        _ext = os.path.splitext(file.filename)[1].lower()
+        _safe_name += _ext
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], _safe_name)
     file.save(filepath)
 
-    # 如果是 GBK 编码的 CSV，转换为 UTF-8（DuckDB 不支持 GBK）
+    # 如果是 GBK / GB18030 编码的 CSV，转换为 UTF-8（DuckDB 不支持这些编码）
     if os.path.splitext(filepath)[1].lower() == '.csv':
         from modules.analysis_engine import _detect_encoding
-        if _detect_encoding(filepath) == 'gbk':
+        _enc = _detect_encoding(filepath)
+        if _enc in ('gbk', 'gb18030'):
             tmp_utf8 = filepath + '.utf8'
-            with open(filepath, 'r', encoding='gbk') as fin, \
+            with open(filepath, 'r', encoding=_enc) as fin, \
                  open(tmp_utf8, 'w', encoding='utf-8', newline='') as fout:
                 import shutil
                 shutil.copyfileobj(fin, fout)
             os.replace(tmp_utf8, filepath)
-            app.logger.info(f"[UPLOAD] CSV 已从 GBK 转换为 UTF-8: {filepath}")
+            app.logger.info(f"[UPLOAD] CSV 已从 {_enc} 转换为 UTF-8: {filepath}")
 
     # 解析可选参数：sheet_name 和 header_row
     sheet_name = request.form.get('sheet_name') or None
@@ -2605,6 +2533,8 @@ def sampling_execute():
     if not engine.table_exists('data'):
         return jsonify({'success': False, 'error': '数据尚未导入，请先完成字段映射'})
 
+    if not DuckDBEngine.validate_select_only(sql):
+        return jsonify({'success': False, 'error': '生成的取样 SQL 包含非只读操作，已拒绝'})
     result = engine.execute(sql)
     if result.get('success'):
         return jsonify({
@@ -2661,6 +2591,10 @@ def execute_code():
         else:
             # 表存在但标记丢失（如调试重启），修复标记
             session['duckdb_imported'] = True
+
+    # 安全校验：仅允许只读 SELECT 查询（拦截写操作、文件读写、扩展加载）
+    if not DuckDBEngine.validate_select_only(sql):
+        return jsonify({'success': False, 'error': '仅允许执行只读查询（SELECT），已拒绝包含写操作或文件访问的 SQL'})
 
     try:
         result = engine.execute(sql)
@@ -2895,22 +2829,6 @@ def export_data():
         return jsonify({'success': False, 'error': f'导出失败: {str(e)}'})
 
 
-@app.route('/api/debug/duckdb-info', methods=['GET'])
-def debug_duckdb_info():
-    """调试: 查看 DuckDB 表状态"""
-    try:
-        engine = get_duckdb_engine()
-        info = {'session_id': session.get('session_id'), 'duckdb_imported': session.get('duckdb_imported')}
-        for tbl in ['data', 'balance_data']:
-            if engine.table_exists(tbl):
-                cols = engine.get_schema(tbl)
-                cnt = engine.get_total_rows(tbl)
-                info[tbl] = {'exists': True, 'columns': cols, 'row_count': cnt}
-            else:
-                info[tbl] = {'exists': False}
-        return jsonify({'success': True, 'info': info})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
 
 
 def allowed_file(filename):
@@ -2977,6 +2895,57 @@ def cleanup_stale_files():
                 except Exception as e:
                     app.logger.error(f"[CLEANUP STARTUP] 删除失败: {fpath}, {e}")
 
+    # 清理临时文件（temp_ 预览 / _analysis_ XLSX转换 / _tmp_import_ 导入中间 / audit_trail 审计日志）
+    # 这些文件超过 24 小时必然无用，安全删除
+    if os.path.isdir(upload_dir):
+        for fname in os.listdir(upload_dir):
+            if not (fname.startswith('temp_') or fname.startswith('_analysis_')
+                    or fname.startswith('_tmp_import_') or fname.startswith('audit_trail')
+                    or fname.startswith('saved_')):
+                continue
+            fpath = os.path.join(upload_dir, fname)
+            if not os.path.isfile(fpath):
+                continue
+            if now - os.path.getmtime(fpath) > cutoff:
+                try:
+                    os.remove(fpath)
+                    deleted.append(fpath)
+                except Exception as e:
+                    app.logger.error(f"[CLEANUP STARTUP] 删除失败: {fpath}, {e}")
+
+    # 清理超过 24h 的原始上传文件（非 temp_ 前缀的正式上传，如 GLA JE_12x.csv）
+    # 用户完成导入后源文件不再需要，长期滞留会占用磁盘
+    if os.path.isdir(upload_dir):
+        for fname in os.listdir(upload_dir):
+            if fname.startswith('temp_') or fname.startswith('_analysis_') or fname.startswith('_tmp_import_'):
+                continue
+            fpath = os.path.join(upload_dir, fname)
+            if not os.path.isfile(fpath):
+                continue
+            # 只清理已知的临时产物扩展名，不碰用户可能留存的文档
+            if not fname.lower().endswith(('.csv', '.xlsx', '.xls')):
+                continue
+            if now - os.path.getmtime(fpath) > cutoff:
+                try:
+                    os.remove(fpath)
+                    deleted.append(fpath)
+                except Exception as e:
+                    app.logger.error(f"[CLEANUP STARTUP] 删除失败: {fpath}, {e}")
+
+    # 清理过期的 Flask-Session 文件（超过 24h 未访问的会话）
+    session_dir = getattr(Config, 'SESSION_FILE_DIR', 'flask_session')
+    if os.path.isdir(session_dir):
+        for fname in os.listdir(session_dir):
+            fpath = os.path.join(session_dir, fname)
+            if not os.path.isfile(fpath):
+                continue
+            if now - os.path.getmtime(fpath) > cutoff:
+                try:
+                    os.remove(fpath)
+                    deleted.append(fpath)
+                except Exception as e:
+                    app.logger.error(f"[CLEANUP STARTUP] 删除 session 失败: {fpath}, {e}")
+
     if deleted:
         app.logger.info(f"[CLEANUP STARTUP] 共清理 {len(deleted)} 个过期文件")
         for p in deleted:
@@ -2993,12 +2962,23 @@ def api_not_found(e):
 
 @app.errorhandler(500)
 def api_server_error(e):
+    # 详细错误只进日志，不向客户端回显（避免泄漏内部路径/SQL/数据结构）
     app.logger.error(f"[500 ERROR] {request.method} {request.path}: {e}")
     if request.path.startswith('/api/'):
-        return jsonify({'success': False, 'error': f'服务器内部错误: {str(e)}'}), 500
+        return jsonify({'success': False, 'error': '服务器内部错误，请查看日志'}), 500
+    return e
+
+@app.errorhandler(413)
+def api_payload_too_large(e):
+    """上传文件过大（超过 MAX_CONTENT_LENGTH）时返回 JSON 而非 Werkzeug 默认 HTML"""
+    if request.path.startswith('/api/'):
+        return jsonify({'success': False, 'error': '上传文件过大，请检查文件大小限制'}), 413
     return e
 
 
 if __name__ == '__main__':
     cleanup_stale_files()
-    app.run(debug=True, port=5003)
+    # 生产环境必须关闭 debug（Werkzeug 交互式调试器有 RCE 风险）
+    # 开发调试请显式设置环境变量 DA_FLASK_DEBUG=1
+    debug_mode = os.environ.get('DA_FLASK_DEBUG', '').strip().lower() in ('1', 'true', 'yes')
+    app.run(host='127.0.0.1', port=5003, debug=debug_mode, use_reloader=False)

@@ -20,6 +20,8 @@ class DuckDBEngine:
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self.db_path = db_path
         self._conn = duckdb.connect(db_path)
+        # 注：DuckDB 1.2.1 无 statement_timeout 配置（新版才支持），查询超时依赖前端/线程层。
+        # 若升级 DuckDB 到支持超时的版本，可在此处 SET statement_timeout = <ms>。
 
     def import_csv(self, csv_path: str, table_name: str,
                    rename_mapping: Optional[Dict[str, str]] = None,
@@ -300,7 +302,7 @@ class DuckDBEngine:
         执行 SQL 查询并返回 JSON 安全结果
 
         Args:
-            sql: SQL 查询语句
+            sql: SQL 查询语句（只读查询由调用方通过 validate_select_only 校验）
 
         Returns:
             {
@@ -367,6 +369,13 @@ class DuckDBEngine:
 
         except Exception as e:
             error_msg = str(e)
+            # 查询超时：返回友好提示
+            if 'timeout' in error_msg.lower() or 'interrupted' in error_msg.lower():
+                return {
+                    'success': False,
+                    'error': '查询执行超时，请简化查询条件或减少数据量后重试',
+                    'error_detail': {'timeout': True}
+                }
             # 提取 DuckDB 错误中的列名和表名，用于前端友好展示
             error_detail = {}
             import re
@@ -539,10 +548,14 @@ class DuckDBEngine:
     @staticmethod
     def validate_select_only(sql: str) -> bool:
         """
-        验证 SQL 是否只包含 SELECT 查询
+        验证 SQL 是否只包含只读查询。
+
+        双重防护：
+        1. 语句必须全部以 SELECT / WITH / EXPLAIN / DESCRIBE / SHOW 开头
+        2. 拦截危险关键字（文件读写、扩展加载、写操作），即使出现在 WITH/子查询里
 
         Returns:
-            True 如果安全（仅 SELECT），False 如果不安全
+            True 如果安全（仅只读查询），False 如果不安全
         """
         import re
         sql_trimmed = sql.strip()
@@ -551,7 +564,24 @@ class DuckDBEngine:
         sql_clean = re.sub(r'--.*$', '', sql_trimmed, flags=re.MULTILINE)
         sql_clean = re.sub(r'/\*.*?\*/', '', sql_clean, flags=re.DOTALL)
 
-        # 如果有多个语句，逐条检查
+        # 剥离字符串字面量（单引号/双引号内容），避免 LIKE '%copy%' 误触发关键字检测
+        sql_no_strings = re.sub(r"'[^']*'", "''", sql_clean)
+        sql_no_strings = re.sub(r'"[^"]*"', '""', sql_no_strings)
+
+        # 危险关键字：文件读写 / 扩展 / 写操作（大小写不敏感）
+        DANGEROUS_PATTERNS = [
+            r'\bCOPY\b', r'\bINSERT\b', r'\bUPDATE\b', r'\bDELETE\b',
+            r'\bDROP\b', r'\bALTER\b', r'\bCREATE\b', r'\bTRUNCATE\b',
+            r'\bATTACH\b', r'\bDETACH\b', r'\bINSTALL\b', r'\bLOAD\b',
+            r'\bREPLACE\b', r'\bRETURNING\b',
+            r'read_csv', r'read_parquet', r'read_json', r'write_csv',
+            r'write_parquet', r'copy_to', r'export_database', r'import_database',
+        ]
+        for pat in DANGEROUS_PATTERNS:
+            if re.search(pat, sql_no_strings, re.IGNORECASE):
+                return False
+
+        # 逐语句检查首词（用原始 SQL，因为字符串里的首词无意义但需保留注释已去除）
         statements = [s.strip() for s in sql_clean.split(';') if s.strip()]
         for stmt in statements:
             tokens = [t for t in re.split(r'\s+', stmt) if t]

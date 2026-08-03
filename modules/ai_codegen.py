@@ -61,10 +61,10 @@ class AICodeGenerator:
 
         preview_str = ""
         if data_preview and len(data_preview) > 0:
-            preview_lines = ["数据预览:"]
-            for i, row in enumerate(data_preview[:3]):
-                row_str = ", ".join([f"{k}: {v}" for k, v in row.items()])
-                preview_lines.append(f"  行{i+1}: {row_str}")
+            # 只发送列名结构，不发送真实数据值（避免敏感财务数据出境）
+            preview_lines = ["数据列结构:"]
+            cols = list(data_preview[0].keys()) if isinstance(data_preview[0], dict) else []
+            preview_lines.append(f"  列: {', '.join(cols)}")
             preview_str = "\n".join(preview_lines)
 
         prompt = f"""你是一个专业的财务数据分析专家，专门处理财务序时账数据。

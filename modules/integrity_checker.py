@@ -315,11 +315,15 @@ class IntegrityChecker:
         jt = self.journal_table
 
         # 构建 WHERE 条件：用户指定的科目编号 OR 摘要包含用户指定的关键词
+        # 安全：单引号转义（'' 表示字面单引号），防止 SQL 注入
+        def _esc(v):
+            return str(v).replace("'", "''")
+
         conditions = []
         if has_account_code and cf_account_code:
-            conditions.append(f'CAST("科目编号" AS VARCHAR) = \'{cf_account_code}\'')
+            conditions.append(f"CAST(\"科目编号\" AS VARCHAR) = '{_esc(cf_account_code)}'")
         if has_summary and cf_keywords:
-            kw_parts = [f'"摘要" LIKE \'%{kw.strip()}%\''
+            kw_parts = [f'"摘要" LIKE \'%{_esc(kw.strip())}%\''
                        for kw in cf_keywords if kw.strip()]
             if len(kw_parts) >= 2:
                 conditions.append('(' + ' AND '.join(kw_parts) + ')')

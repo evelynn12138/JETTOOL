@@ -1,6 +1,14 @@
 // DA数据清洗业务AI应用 - 主应用JavaScript
 // 通用工具函数和事件处理
 
+// HTML 转义，防止 XSS
+function escapeHtml(text) {
+    if (text === null || text === undefined) return '';
+    const d = document.createElement('div');
+    d.textContent = String(text);
+    return d.innerHTML;
+}
+
 class FinanceQueryApp {
     constructor() {
         this.init();
@@ -103,7 +111,7 @@ class FinanceQueryApp {
         notification.innerHTML = `
             <div class="notification-content">
                 <i class="fas ${this.getNotificationIcon(type)}"></i>
-                <span>${message}</span>
+                <span>${escapeHtml(message)}</span>
             </div>
             <button class="notification-close">
                 <i class="fas fa-times"></i>
@@ -222,7 +230,7 @@ class FinanceQueryApp {
         loading.className = 'loading-state';
         loading.innerHTML = `
             <div class="spinner"></div>
-            <p>${message}</p>
+            <p>${escapeHtml(message)}</p>
         `;
 
         loading.style.cssText = `

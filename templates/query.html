@@ -852,7 +852,7 @@
                         <i class="fas fa-info-circle"></i>
                         <div>
                             <span class="summary-label">说明</span>
-                            <span class="summary-text">${result.summary.message || '执行完成'}</span>
+                            <span class="summary-text">${escapeHtml(result.summary.message || '执行完成')}</span>
                         </div>
                     </div>
                 `;
@@ -860,11 +860,11 @@
 
             // 显示表格
             if (result.data && result.data.length > 0) {
-                // 生成表头
+                // 生成表头（escapeHtml 防 XSS）
                 const headers = Object.keys(result.data[0]);
                 let thead = '<thead><tr>';
                 headers.forEach(header => {
-                    thead += `<th>${header}</th>`;
+                    thead += `<th>${escapeHtml(header)}</th>`;
                 });
                 thead += '</tr></thead>';
 
@@ -913,16 +913,11 @@
             }
 
             if (typeof value === 'string') {
-                // 如果是日期字符串，尝试格式化
-                if (value.match(/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/) ||
-                    value.match(/^\d{1,2}[-/.]\d{1,2}[-/.]\d{4}/) ||
-                    value.match(/^\d{4}年\d{1,2}月\d{1,2}日$/)) {
-                    return value;
-                }
-                return value;
+                // 所有字符串统一 HTML 转义，防止 XSS（日期格式保持原样但已安全）
+                return escapeHtml(value);
             }
 
-            return String(value);
+            return escapeHtml(String(value));
         }
 
         // 格式化货币

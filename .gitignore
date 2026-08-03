@@ -45,6 +45,12 @@ electron/build/
 venv/
 .venv/
 
+# 便携 Python 运行时（打包用，非源码）
+runtime/
+
+# 归档文件
+*.zip
+
 # Environment
 .env
 *.env.local

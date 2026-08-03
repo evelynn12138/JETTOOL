@@ -90,6 +90,26 @@ def _detect_encoding(filepath: str) -> str:
     if _is_gbk(raw):
         return 'gbk'
 
+    # GB18030 是 GBK 的超集，兼容 GBK 无法解码的专有字符（如 €、部分生僻字）。
+    # 放在 GBK 之后，不会影响纯 GBK 文件的判断；仅当 GBK 解码失败时才尝试。
+    # GB18030 单字符最长 4 字节。
+    def _is_gb18030(b: bytes) -> bool:
+        try:
+            b.decode('gb18030')
+            return True
+        except UnicodeDecodeError:
+            for drop in (1, 2, 3, 4):
+                if len(b) > drop:
+                    try:
+                        b[:-drop].decode('gb18030')
+                        return True
+                    except UnicodeDecodeError:
+                        continue
+            return False
+
+    if _is_gb18030(raw):
+        return 'gb18030'
+
     # latin-1 永远能解（单字节映射），作为最后兜底
     return 'latin-1'
 
@@ -99,9 +119,9 @@ def _ensure_utf8_csv(path: str) -> str:
     enc = _detect_encoding(path)
     if enc in _DUCKDB_SUPPORTED_ENCODINGS:
         return path  # DuckDB 可以直接读
-    if enc == 'gbk':
+    if enc in ('gbk', 'gb18030'):
         tmp_path = path + '.utf8'
-        with open(path, 'r', encoding='gbk') as fin, \
+        with open(path, 'r', encoding=enc) as fin, \
              open(tmp_path, 'w', encoding='utf-8', newline='') as fout:
             import shutil
             shutil.copyfileobj(fin, fout)
@@ -196,8 +216,8 @@ class AnalysisEngine:
         """
         if self.ext == '.csv':
             path = self.filepath
-            # GBK 编码转换
-            if _detect_encoding(path) == 'gbk':
+            # GBK / GB18030 编码转换（GB18030 是 GBK 超集，含专有字符时检测返回 gb18030）
+            if _detect_encoding(path) in ('gbk', 'gb18030'):
                 self._tmp_utf8_path = _ensure_utf8_csv(path)
                 return self._tmp_utf8_path, 'utf-8'
             return path, None

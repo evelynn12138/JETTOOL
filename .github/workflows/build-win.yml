@@ -51,11 +51,15 @@ jobs:
       - name: 构建 .exe
         env:
           COMMIT_HASH: ${{ github.sha }}
+          DIFY_MAIN_BASE_URL: ${{ secrets.DIFY_MAIN_BASE_URL }}
+          DIFY_MAIN_API_KEY: ${{ secrets.DIFY_MAIN_API_KEY }}
+          DIFY_REVIEW_BASE_URL: ${{ secrets.DIFY_REVIEW_BASE_URL }}
+          DIFY_REVIEW_API_KEY: ${{ secrets.DIFY_REVIEW_API_KEY }}
         run: |
           echo "Build version: $env:COMMIT_HASH"
-          # 生成占位 bundle（CI 从仓库构建，不含真实 key）。
-          # 本地打包请用 tools/make_bundle.py 生成含真实 key 的 dify_bundle.enc 后跑 build_win.bat
-          python -c "import json; json.dump({'secret':'ci-placeholder-secret','DIFY_MAIN_API_KEY':'','DIFY_REVIEW_API_KEY':''}, open('dify_bundle.enc','w'))"
+          # 生成真实 bundle：从 GitHub Secrets 读取 Dify key（私有仓库 Secrets，不入代码库）
+          # 若 Secrets 未配置，则 key 为空（exe 不含 key，需用户另配）
+          python -c "import json,os; json.dump({'secret':'bundled-secret-for-internal-dist','DIFY_MAIN_API_KEY':os.environ.get('DIFY_MAIN_API_KEY',''),'DIFY_REVIEW_API_KEY':os.environ.get('DIFY_REVIEW_API_KEY','')}, open('dify_bundle.enc','w'))"
           pyinstaller `
             --clean `
             --name "DA数据清洗工具" `

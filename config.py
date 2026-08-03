@@ -146,8 +146,8 @@ class Config:
     SESSION_USE_SIGNER = True
     PERMANENT_SESSION_LIFETIME = timedelta(hours=1)
 
-    # 文件上传配置
-    MAX_CONTENT_LENGTH = 4096 * 1024 * 1024  # 4GB
+    # 文件上传配置（收紧到 1GB，防止磁盘炸弹；百万行财务文件通常 < 500MB）
+    MAX_CONTENT_LENGTH = 1024 * 1024 * 1024  # 1GB
     UPLOAD_FOLDER = 'temp'
     DUCKDB_DIR = 'temp/db'
     ALLOWED_EXTENSIONS = {'xlsx', 'csv', 'xls'}
