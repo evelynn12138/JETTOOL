@@ -241,7 +241,7 @@ class ReportCleaner:
             content = dify_client.chat(
                 "你是一个专业的财务报表格式分析专家，返回严格 JSON 格式的分析结果。",
                 prompt,
-                timeout=30,
+                timeout=120,
             )
         except Exception as e:
             return {"success": False, "error": f"AI 检测失败: {e}"}

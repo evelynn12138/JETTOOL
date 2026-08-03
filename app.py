@@ -820,7 +820,7 @@ def ai_analyze_integrity():
         content = dify.chat(
             "你是一名资深的财务审计专家，擅长从审计视角分析财务数据问题。",
             prompt,
-            timeout=60,
+            timeout=120,
         )
         return jsonify({'success': True, 'analysis': content.strip()})
 
@@ -1140,7 +1140,7 @@ def auto_map_fields():
         content = dify.chat(
             "你只返回 JSON，不加 Markdown 代码块。",
             prompt,
-            timeout=30,
+            timeout=120,
         )
 
         # Strip markdown code block wrappers if present
@@ -1770,7 +1770,7 @@ def api_report_reconciliation_ai_analyze():
         analysis = dify.chat(
             "你是一个经验丰富的审计数据核对专家。",
             prompt,
-            timeout=30,
+            timeout=120,
         )
         return jsonify({'success': True, 'analysis': analysis})
 
@@ -2085,7 +2085,7 @@ def review_code():
         content = dify.chat(
             "你是一名资深的 SQL 审查专家。只输出 JSON，不要加 Markdown 代码块包裹。",
             prompt,
-            timeout=60,
+            timeout=120,
         )
 
         # 清理 Markdown 包裹

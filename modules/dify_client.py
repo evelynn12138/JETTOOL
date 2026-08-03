@@ -15,7 +15,7 @@ class DifyClient:
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
 
-    def chat(self, system_prompt: str, user_prompt: str, timeout: int = 60) -> str:
+    def chat(self, system_prompt: str, user_prompt: str, timeout: int = 120) -> str:
         """
         发送到 Dify Workflow，返回 LLM 响应文本。
 

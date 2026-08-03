@@ -867,7 +867,7 @@ class ReconciliationEngine:
             content = dify_client.chat(
                 "你是一个会计科目映射专家，返回严格 JSON 格式。",
                 prompt,
-                timeout=30,
+                timeout=120,
             )
             parsed = self._parse_json(content)
             if not isinstance(parsed, list):

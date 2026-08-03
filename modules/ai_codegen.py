@@ -129,7 +129,7 @@ class AICodeGenerator:
         return self.dify_client.chat(
             "你是一个专业的SQL数据分析专家，专门生成DuckDB SQL查询。",
             prompt,
-            timeout=30,
+            timeout=120,
         )
 
     def _extract_code(self, response_content: str) -> str:
@@ -259,7 +259,7 @@ class AICodeGenerator:
             return self.dify_client.chat(
                 "你是一个专业的 SQL 解释器。",
                 prompt,
-                timeout=30,
+                timeout=120,
             ).strip()
         except Exception:
             return "解释生成失败。"
@@ -319,7 +319,7 @@ class AICodeGenerator:
             optimized_query = self.dify_client.chat(
                 '你是财务数据查询优化专家。把模糊概念变具体（月底→最后五天），扩展关键词的英文/缩写变体（调整→adj、adjustment），识别人名加拼音变体。不扩展字段名。',
                 prompt,
-                timeout=30,
+                timeout=120,
             ).strip()
             optimized_query = optimized_query.replace('优化后的查询:', '').replace('优化查询:', '').strip()
             return optimized_query
