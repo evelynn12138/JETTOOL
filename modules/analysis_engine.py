@@ -180,6 +180,37 @@ def _xlsx_to_temp_csv(filepath: str, csv_dir: str,
     return tmp_csv
 
 
+# 分隔符候选列表：多字符优先（避免单字符在长分隔符里误命中，如 -| 不能先试 |）
+_DELIMITER_CANDIDATES = ['-|', '￢', ',', '\t', ';', '|', '#', ' ']
+
+
+def _detect_delimiter(csv_path: str, conn, n_rows: int = 10):
+    """遍历候选分隔符，选拆出列数最多且各列一致的候选。
+
+    返回分隔符字符串；无法识别时返回 None（保持 DuckDB 自动检测兜底）。
+    - 正确分隔符会拆出最多列；错误分隔符要么把多列黏一起、要么错拆
+    - 只对 CSV 调用（XLSX 转出的临时 CSV 固定逗号分隔）
+    """
+    best = None
+    best_cols = 1
+    for d in _DELIMITER_CANDIDATES:
+        try:
+            r = conn.execute(
+                f"SELECT * FROM read_csv_auto('{csv_path}', "
+                f"header=true, all_varchar=true, delim='{d}') LIMIT {n_rows}"
+            ).fetchall()
+            if not r:
+                continue
+            col_count = len(r[0])
+            consistent = all(len(row) == col_count for row in r)
+            if col_count > best_cols and consistent:
+                best = d
+                best_cols = col_count
+        except Exception:
+            continue
+    return best
+
+
 class AnalysisEngine:
     """DuckDB 版文件分析和预览工具
 
@@ -204,6 +235,7 @@ class AnalysisEngine:
         self.cached_csv_path = None   # XLSX→CSV 缓存路径
         self._tmp_table = None         # DuckDB 临时表名
         self._tmp_utf8_path = None     # GBK→UTF-8 转换路径
+        self._delimiter = None         # 探测到的分隔符（仅 CSV）
 
     def _resolve_readable(self, sheet_name=None, header_row=None):
         """返回可被 DuckDB read_csv_auto 读取的 CSV 路径及已知编码。
@@ -245,10 +277,18 @@ class AnalysisEngine:
         enc = known_enc or _detect_encoding(csv_path)
         enc_clause = f"encoding='{enc}'" if enc in _DUCKDB_SUPPORTED_ENCODINGS else ""
 
+        # 探测分隔符（仅 CSV；XLSX 转出的临时 CSV 固定逗号分隔，无需探测）
+        delim_clause = ''
+        if self.ext == '.csv':
+            if self._delimiter is None:
+                self._delimiter = _detect_delimiter(csv_path, self.conn)
+            if self._delimiter:
+                delim_clause = f", delim='{self._delimiter}'"
+
         self.conn.execute(f"""
             CREATE OR REPLACE TEMP TABLE "{tbl}" AS
             SELECT * FROM read_csv_auto('{csv_path}',
-                header=true, {enc_clause}, all_varchar=true)
+                header=true, {enc_clause}, all_varchar=true{delim_clause})
         """)
         self._tmp_table = tbl
         return tbl
